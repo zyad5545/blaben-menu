@@ -1,0 +1,11 @@
+node_modules/
+dist/
+backups/
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
+*.zip
+New folder/
+New folder.zip
