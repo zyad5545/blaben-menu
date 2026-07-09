@@ -7,5 +7,7 @@ backups/
 *.log
 *.tmp
 *.zip
+refactor*.js
+refactor*.cjs
 New folder/
 New folder.zip

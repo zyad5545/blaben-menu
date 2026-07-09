@@ -10,11 +10,13 @@ const NEW = "منتجات جديدة";
 const ADMIN_ROUTE = "/staff-portal-blaben-73.html";
 const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
-// Filename of the badge image you uploaded to /public/menu-assets.
-// Change the extension below if your file is .jpg/.jpeg/.webp instead of .png.
-const SPECIAL_OFFER_BADGE = "عرض خاص.png";
+// The "coming soon" state label used in badges across the menu.
+const COMING_SOON_LABEL = "قريبا";
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.warn("⚠️ Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY. Auth and database features will be disabled.");
+}
 const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
 const productImages = [
@@ -88,9 +90,7 @@ function asset(path) {
   return `${ASSET}${encodeURIComponent("b.laben logo.jfif")}`;
 }
 
-function specialOfferBadge() {
-  return asset(SPECIAL_OFFER_BADGE);
-}
+// Coming-soon badge is now rendered as a styled text element, not an image.
 
 // Flexible per-product pricing: a product can either have one plain price,
 // OR a list of size/option variants (e.g. "بدون آيس كريم" / "سكوب صغير" /
@@ -547,7 +547,7 @@ function ProductCard({ product, onOpen, compact = false }) {
       <div className={`${compact ? "h-36" : "h-48"} relative overflow-hidden bg-blaben-50`}>
         <img loading="lazy" decoding="async" src={asset(product.image)} alt={product.name} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
         {product.state === "unavailable" && <span className="absolute start-3 top-3 rounded-full bg-red-600 px-3 py-1 text-xs font-black text-white shadow-md">غير متاح</span>}
-        {product.state === "special_offer" && <img src={specialOfferBadge()} alt="عرض خاص" loading="lazy" decoding="async" className="absolute start-3 top-3 h-10 w-10 object-contain drop-shadow-lg" />}
+        {product.state === "coming_soon" && <span className="absolute start-3 top-3 rounded-full bg-amber-500 px-3 py-1 text-xs font-black text-white shadow-md animate-pulse">{COMING_SOON_LABEL}</span>}
       </div>
       <div className="grid gap-2 p-4">
         <h3 className="text-lg font-black leading-relaxed text-blaben-950">{product.name}</h3>
@@ -568,7 +568,7 @@ function ProductModal({ product, onClose }) {
         <button className="absolute start-3 top-3 z-10 grid h-11 w-11 place-items-center rounded-full bg-white/90 text-2xl font-black text-blaben-950 shadow" onClick={onClose} aria-label="إغلاق">×</button>
         <div className="relative h-72 bg-blaben-50 md:h-full md:min-h-[430px]">
           <img loading="lazy" decoding="async" src={asset(product.image)} alt={product.name} className="h-full w-full object-cover" />
-          {product.state === "special_offer" && <img src={specialOfferBadge()} alt="عرض خاص" loading="lazy" decoding="async" className="absolute start-3 top-3 h-12 w-12 object-contain drop-shadow-lg" />}
+          {product.state === "coming_soon" && <span className="absolute start-3 top-3 rounded-full bg-amber-500 px-3 py-1.5 text-sm font-black text-white shadow-md animate-pulse">{COMING_SOON_LABEL}</span>}
         </div>
         <div className="grid content-center gap-4 overflow-y-auto p-6 md:p-10">
           <p className="font-black text-blaben-700">{product.category}</p>
@@ -587,7 +587,7 @@ function ProductModal({ product, onClose }) {
           ) : (
             <span className="w-max rounded-full bg-blaben-100 px-4 py-2 font-black text-blaben-850">{pricing.display}</span>
           )}
-          <span className={`w-max rounded-full px-4 py-2 font-black ${product.state === "unavailable" ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-700"}`}>{product.state === "unavailable" ? "غير متاح حاليا" : "متاح"}</span>
+          <span className={`w-max rounded-full px-4 py-2 font-black ${product.state === "unavailable" ? "bg-red-50 text-red-600" : product.state === "coming_soon" ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>{product.state === "unavailable" ? "غير متاح حاليا" : product.state === "coming_soon" ? COMING_SOON_LABEL : "متاح"}</span>
         </div>
       </section>
     </div>
@@ -985,7 +985,7 @@ function Version7({ groups, onOpen }) {
                   {/* Front */}
                   <div className="v7-flip-front">
                     <img loading="lazy" decoding="async" src={asset(product.image)} alt={product.name} />
-                    {product.state === "special_offer" && <img src={specialOfferBadge()} alt="عرض خاص" loading="lazy" decoding="async" className="absolute start-2 top-2 h-9 w-9 object-contain drop-shadow-lg" />}
+                    {product.state === "coming_soon" && <span className="absolute start-2 top-2 rounded-full bg-amber-500 px-2 py-1 text-xs font-black text-white shadow-md animate-pulse">{COMING_SOON_LABEL}</span>}
                     <div className="v7-flip-front-info">
                       <h3 className="text-base font-black leading-relaxed text-blaben-950">
                         {product.name}
@@ -1020,10 +1020,10 @@ function Version7({ groups, onOpen }) {
                     )}
                     <span
                       className={`w-max rounded-full px-3 py-1.5 text-sm font-black ${
-                        product.state === "unavailable" ? "bg-red-500/20 text-red-200" : "bg-emerald-500/20 text-emerald-200"
+                        product.state === "unavailable" ? "bg-red-500/20 text-red-200" : product.state === "coming_soon" ? "bg-amber-500/20 text-amber-200" : "bg-emerald-500/20 text-emerald-200"
                       }`}
                     >
-                      {product.state === "unavailable" ? "غير متاح" : "متاح"}
+                      {product.state === "unavailable" ? "غير متاح" : product.state === "coming_soon" ? COMING_SOON_LABEL : "متاح"}
                     </span>
                   </div>
                 </div>
@@ -1114,7 +1114,7 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
                   <button key={`${selectedGroup.name}-${product.id}`} type="button" className="v6-list-card reveal-card" onClick={() => onOpen(product)}>
                     <span className="relative block shrink-0">
                       <img loading="lazy" decoding="async" src={asset(product.image)} alt={product.name} />
-                      {product.state === "special_offer" && <img src={specialOfferBadge()} alt="عرض خاص" loading="lazy" decoding="async" className="absolute start-1 top-1 h-7 w-7 object-contain drop-shadow-lg" />}
+                      {product.state === "coming_soon" && <span className="absolute start-1 top-1 rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-black text-white shadow-md animate-pulse">{COMING_SOON_LABEL}</span>}
                     </span>
                     <div className="grid gap-1 text-right">
                       <h3 className="text-sm font-black leading-relaxed text-blaben-950">{product.name}</h3>
@@ -1146,6 +1146,19 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
 }
 
 
+// Map Supabase error messages to user-friendly Arabic messages
+function mapSupabaseError(message) {
+  const lower = (message || "").toLowerCase();
+  if (lower.includes("invalid login credentials")) return "البريد الإلكتروني أو كلمة المرور غير صحيحة.";
+  if (lower.includes("email not confirmed")) return "يجب تأكيد البريد الإلكتروني أولاً.";
+  if (lower.includes("invalid api key") || lower.includes("apikey")) return "إعدادات Supabase غير صحيحة. تحقق من مفتاح API.";
+  if (lower.includes("network") || lower.includes("fetch") || lower.includes("failed to fetch")) return "تعذر الاتصال بالخادم. تحقق من الاتصال بالإنترنت.";
+  if (lower.includes("rate limit") || lower.includes("too many")) return "محاولات كثيرة جداً. انتظر قليلاً ثم حاول مرة أخرى.";
+  if (lower.includes("user not found")) return "المستخدم غير موجود.";
+  // Fallback: show the original error for debugging
+  return `خطأ: ${message}`;
+}
+
 function AdminPortal({ catalog }) {
   const [items, setItems] = useState(loadCustomProducts());
   const [session, setSession] = useState(null);
@@ -1154,14 +1167,60 @@ function AdminPortal({ catalog }) {
   const [message, setMessage] = useState("");
   const [query, setQuery] = useState("");
   const [activeTab, setActiveTab] = useState("products");
+  const [connectionError, setConnectionError] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const configured = Boolean(supabase);
   const source = configured ? items : items.length ? items : catalog;
   const filtered = query.trim() ? source.filter((product) => productMatches(product, query)) : source;
 
+  // Verify that a user exists in admin_users table
+  const verifyAdmin = async (userId) => {
+    if (!supabase) return false;
+    const { data: admin, error } = await supabase
+      .from("admin_users")
+      .select("user_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+    console.log("Admin check:", { userId, admin, error });
+    return Boolean(admin);
+  };
+
   useEffect(() => {
     if (!supabase) return;
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
+    const initSession = async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) {
+          console.error("getSession error:", error);
+          setConnectionError(true);
+          setMessage("تعذر الاتصال بـ Supabase.");
+          return;
+        }
+        console.log("Restored session:", data.session);
+        if (data.session) {
+          // Verify admin status on session restore
+          const isAdmin = await verifyAdmin(data.session.user.id);
+          if (!isAdmin) {
+            console.warn("Session user is not an admin. Signing out.");
+            await supabase.auth.signOut();
+            setSession(null);
+            setMessage("الحساب ليس مسؤولاً. تم تسجيل الخروج.");
+            return;
+          }
+          setSession(data.session);
+        }
+      } catch (err) {
+        console.error("Supabase connection failed:", err);
+        setConnectionError(true);
+        setMessage("تعذر الاتصال بـ Supabase. تحقق من إعدادات المشروع.");
+      }
+    };
+    initSession();
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      // Only update session via the listener if it's a sign-out event
+      // Login sets session manually after admin verification
+      if (!nextSession) setSession(null);
+    });
     return () => listener.subscription.unsubscribe();
   }, []);
 
@@ -1184,8 +1243,30 @@ function AdminPortal({ catalog }) {
     event.preventDefault();
     setMessage("");
     if (!supabase) return;
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) setMessage("بيانات الدخول غير صحيحة أو الحساب غير مصرح له.");
+    setIsLoggingIn(true);
+    try {
+      const { data: authData, error } = await supabase.auth.signInWithPassword({ email, password });
+      console.log("Login result:", { session: authData?.session, error });
+      if (error) {
+        console.error("Login error:", error);
+        setMessage(mapSupabaseError(error.message));
+        return;
+      }
+      // Verify admin authorization
+      const isAdmin = await verifyAdmin(authData.session.user.id);
+      console.log("Admin verification:", { userId: authData.session.user.id, isAdmin });
+      if (!isAdmin) {
+        await supabase.auth.signOut();
+        setMessage("هذا الحساب ليس مسؤولاً.");
+        return;
+      }
+      setSession(authData.session);
+    } catch (err) {
+      console.error("Login exception:", err);
+      setMessage("تعذر الاتصال بالخادم. حاول مرة أخرى.");
+    } finally {
+      setIsLoggingIn(false);
+    }
   };
 
   const saveLocal = (next) => {
@@ -1285,12 +1366,34 @@ function AdminPortal({ catalog }) {
           <p className="font-black text-blaben-700">بوابة الإدارة</p>
           <h1 className="mt-3 text-4xl font-black text-blaben-950">تسجيل دخول الأدمن</h1>
           <p className="mt-3 leading-7 text-slate-500">الرابط وحده لا يحمي الصفحة. الدخول هنا يعتمد على Supabase Auth و RLS.</p>
-          <form onSubmit={login} className="mt-5 grid gap-3">
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="البريد الإلكتروني" className="rounded-lg border border-blue-100 p-3" required />
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="كلمة المرور" className="rounded-lg border border-blue-100 p-3" required />
-            <button className="rounded-lg bg-blaben-850 px-5 py-3 font-black text-white">دخول</button>
-          </form>
+          {connectionError ? (
+            <div className="mt-5 rounded-lg bg-red-50 p-4 text-sm font-bold text-red-600">
+              <p>تعذر الاتصال بـ Supabase.</p>
+              <p className="mt-1 text-xs text-red-500">تحقق من إعدادات VITE_SUPABASE_URL و VITE_SUPABASE_ANON_KEY.</p>
+            </div>
+          ) : (
+            <form onSubmit={login} className="mt-5 grid gap-3">
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="البريد الإلكتروني" className="rounded-lg border border-blue-100 p-3" required />
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="كلمة المرور" className="rounded-lg border border-blue-100 p-3" required />
+              <button disabled={isLoggingIn} className="rounded-lg bg-blaben-850 px-5 py-3 font-black text-white disabled:opacity-60">{isLoggingIn ? "جاري الدخول..." : "دخول"}</button>
+            </form>
+          )}
           {message && <p className="mt-3 rounded-lg bg-red-50 p-3 text-sm font-bold text-red-600">{message}</p>}
+          {/* Dev debug panel — only visible during development */}
+          {import.meta.env.DEV && (
+            <details className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+              <summary className="cursor-pointer font-black text-slate-700">🛠 Debug Info (dev only)</summary>
+              <div className="mt-2 grid gap-1 font-mono">
+                <p><strong>Supabase URL:</strong> {supabaseUrl || "❌ MISSING"}</p>
+                <p><strong>Anon Key:</strong> {supabaseAnonKey ? `${supabaseAnonKey.slice(0, 20)}...` : "❌ MISSING"}</p>
+                <p><strong>Connection:</strong> {connectionError ? "❌ Failed" : "✅ OK"}</p>
+                <p><strong>Session:</strong> {session ? "✅ Active" : "❌ None"}</p>
+                <p><strong>User ID:</strong> {session?.user?.id || "—"}</p>
+                <p><strong>User Email:</strong> {session?.user?.email || "—"}</p>
+                <p><strong>Current URL:</strong> {window.location.href}</p>
+              </div>
+            </details>
+          )}
         </section>
       </main>
     );
@@ -1364,7 +1467,7 @@ function toSupabaseProduct(product) {
     category: limitText(product.category, 70),
     price: limitText(product.price, 60),
     description: limitText(product.description || "", 500),
-    state: ["available", "unavailable", "special_offer"].includes(product.state) ? product.state : "available",
+    state: ["available", "unavailable", "coming_soon"].includes(product.state) ? product.state : "available",
     image_url: isSafeImageSrc(product.image) ? product.image : "b.laben logo.jfif",
     sort_order: product.sort_order || 0,
     variants: Array.isArray(product.variants)
@@ -1495,7 +1598,7 @@ function AdminCreateForm({ categories, items, saveLocal, configured, session, se
 
       <Field label="اسم المنتج" name="name" placeholder="مثال: قشطوطة مانجو" />
       <Field label="السعر الأساسي" name="price" placeholder="مثال: 120 جنيه" />
-      <label className="grid gap-2 font-black text-blaben-950">الحالة<select name="state" className="rounded-lg border border-blue-100 p-3 font-normal"><option value="available">متاح</option><option value="unavailable">غير متاح</option><option value="special_offer">عرض خاص</option></select></label>
+      <label className="grid gap-2 font-black text-blaben-950">الحالة<select name="state" className="rounded-lg border border-blue-100 p-3 font-normal"><option value="available">متاح</option><option value="unavailable">غير متاح</option><option value="coming_soon">قريبا</option></select></label>
       <VariantEditor variants={variants} onChange={setVariants} />
       <label className="grid gap-2 font-black text-blaben-950 md:col-span-2">الوصف<textarea name="description" rows="3" className="rounded-lg border border-blue-100 p-3 font-normal" /></label>
       <label className="grid gap-2 font-black text-blaben-950 md:col-span-2">الصورة<input name="image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(e) => setPreview(e.target.files?.[0] && isAllowedImageFile(e.target.files[0]) ? URL.createObjectURL(e.target.files[0]) : "")} className="rounded-lg border border-blue-100 p-3 font-normal" /></label>
@@ -1681,7 +1784,7 @@ function AdminProductRow({ product, onUpdate, onDelete }) {
         <input value={draft.price} onChange={(e) => setDraft({ ...draft, price: limitText(e.target.value, 60) })} placeholder="السعر الأساسي" className="rounded-lg border border-blue-100 p-2" />
         <select value={draft.state} onChange={(e) => setDraft({ ...draft, state: e.target.value })} className="rounded-lg border border-blue-100 p-2">
           <option value="available">متاح</option>
-          <option value="unavailable">غير متاح</option><option value="special_offer">عرض خاص</option>
+          <option value="unavailable">غير متاح</option><option value="coming_soon">قريبا</option>
         </select>
         <textarea value={draft.description || ""} onChange={(e) => setDraft({ ...draft, description: limitText(e.target.value, 500) })} className="rounded-lg border border-blue-100 p-2 md:col-span-2" rows="2" />
         <VariantEditor variants={draft.variants} onChange={(next) => setDraft({ ...draft, variants: next })} />
