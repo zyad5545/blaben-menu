@@ -365,18 +365,30 @@ function groupProducts(products) {
     if (!map.has(product.category)) map.set(product.category, []);
     map.get(product.category).push(product);
   });
-  const priority = [OFFERS, NEW, "الأكثر طلبا"];
   
   let customCatImages = {};
+  let customOrder = [];
   try {
     customCatImages = JSON.parse(localStorage.getItem("blabenCategoryImages") || "{}");
+    customOrder = JSON.parse(localStorage.getItem("blabenCategoryOrder") || "[]");
   } catch {}
+
+  const priority = [OFFERS, NEW, "الأكثر طلبا"];
 
   return [...map.entries()]
     .sort(([a], [b]) => {
+      // 1. Custom order from admin drag-and-drop
+      const customIdxA = customOrder.indexOf(a);
+      const customIdxB = customOrder.indexOf(b);
+      if (customIdxA !== -1 && customIdxB !== -1) return customIdxA - customIdxB;
+      if (customIdxA !== -1) return -1;
+      if (customIdxB !== -1) return 1;
+
+      // 2. Fallback to hardcoded priority
       const ai = priority.indexOf(a);
       const bi = priority.indexOf(b);
       if (ai !== -1 || bi !== -1) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+      
       return 0;
     })
     .map(([name, items]) => ({ name, items, image: customCatImages[name] || items[0]?.image }));
@@ -1325,17 +1337,33 @@ function AdminPortal({ catalog }) {
     }
   };
 
-  const deleteCategory = async (name) => {
+  const deleteCategory = async (name, mode = "uncategorize", targetCategory = "") => {
     const fallback = "غير مصنف";
-    if (configured && session) {
-      const { error } = await supabase.from("products").update({ category: fallback }).eq("category", name);
-      if (error) {
-        setMessage("تعذر حذف التصنيف في Supabase.");
-        return;
+    if (mode === "delete") {
+      // Delete all products in this category
+      if (configured && session) {
+        const { error } = await supabase.from("products").delete().eq("category", name);
+        if (error) {
+          setMessage("تعذر حذف منتجات التصنيف من Supabase.");
+          return;
+        }
+        setItems(items.filter((item) => item.category !== name));
+      } else {
+        saveLocal(items.filter((item) => item.category !== name));
       }
-      setItems(items.map((item) => (item.category === name ? { ...item, category: fallback } : item)));
     } else {
-      saveLocal(items.map((item) => (item.category === name ? { ...item, category: fallback } : item)));
+      // Move products to fallback or target category
+      const moveTo = mode === "move" && targetCategory ? targetCategory : fallback;
+      if (configured && session) {
+        const { error } = await supabase.from("products").update({ category: moveTo }).eq("category", name);
+        if (error) {
+          setMessage("تعذر نقل المنتجات في Supabase.");
+          return;
+        }
+        setItems(items.map((item) => (item.category === name ? { ...item, category: moveTo } : item)));
+      } else {
+        saveLocal(items.map((item) => (item.category === name ? { ...item, category: moveTo } : item)));
+      }
     }
   };
 
@@ -1414,9 +1442,9 @@ function AdminPortal({ catalog }) {
         </div>
 
         {activeTab === "products" && (
-          <div className="mt-4 flex flex-wrap gap-2">
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="بحث عن منتج..." className="min-w-64 flex-1 rounded-lg border border-blue-100 p-3" />
-            {configured && session && <button onClick={() => supabase.auth.signOut()} className="rounded-lg bg-blaben-100 px-4 py-3 font-black text-blaben-850">تسجيل خروج</button>}
+          <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-[1fr_auto]">
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="بحث عن منتج..." className="rounded-lg border border-blue-100 p-3 w-full" />
+            {configured && session && <button onClick={() => supabase.auth.signOut()} className="rounded-lg bg-blaben-100 px-4 py-3 font-black text-blaben-850 whitespace-nowrap">تسجيل خروج</button>}
           </div>
         )}
         
@@ -1433,10 +1461,13 @@ function AdminPortal({ catalog }) {
       {activeTab === "products" ? (
         <>
           <AdminCreateForm categories={Array.from(new Set(catalog.map(p => p.category).concat(items.map(p => p.category))))} items={items} saveLocal={saveLocal} configured={configured} session={session} setMessage={setMessage} />
-          <section className="mt-6 grid gap-3">
-            {filtered.map((product) => (
-              <AdminProductRow key={`${product.uuid || product.id}-${product.name}`} product={product} onUpdate={updateProduct} onDelete={removeProduct} />
-            ))}
+          <section className="mt-6">
+            {query.trim() && <p className="mb-3 text-sm font-bold text-slate-500">{filtered.length ? `${filtered.length} نتيجة` : "لا توجد نتائج مطابقة للبحث."}</p>}
+            <div className="grid gap-3" style={{ minHeight: "200px" }}>
+              {filtered.map((product) => (
+                <AdminProductRow key={`${product.uuid || product.id}-${product.name}`} product={product} onUpdate={updateProduct} onDelete={removeProduct} />
+              ))}
+            </div>
           </section>
         </>
       ) : (
@@ -1608,6 +1639,59 @@ function AdminCreateForm({ categories, items, saveLocal, configured, session, se
   );
 }
 
+function CategoryDeleteModal({ isOpen, categoryName, categories, onClose, onConfirm }) {
+  const [mode, setMode] = useState("uncategorize");
+  const [targetCategory, setTargetCategory] = useState(categories[0] || "");
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] grid place-items-center p-4 bg-slate-900/50 backdrop-blur-sm">
+      <div className="grid w-full max-w-md gap-4 rounded-xl bg-white p-6 shadow-2xl">
+        <h2 className="text-2xl font-black text-red-600">حذف تصنيف "{categoryName}"</h2>
+        <p className="text-slate-600">هذا التصنيف يحتوي على منتجات. ماذا تريد أن تفعل بها؟</p>
+        
+        <div className="grid gap-3 mt-2">
+          <label className={`flex cursor-pointer gap-3 rounded-lg border p-3 ${mode === "uncategorize" ? "border-blaben-500 bg-blaben-50" : "border-slate-200"}`}>
+            <input type="radio" name="delete_mode" checked={mode === "uncategorize"} onChange={() => setMode("uncategorize")} className="mt-1" />
+            <div>
+              <p className="font-black text-blaben-950">نقل إلى "غير مصنف"</p>
+              <p className="text-sm text-slate-500">سيتم تجميع المنتجات تحت تصنيف عام.</p>
+            </div>
+          </label>
+          
+          <label className={`flex cursor-pointer gap-3 rounded-lg border p-3 ${mode === "move" ? "border-blaben-500 bg-blaben-50" : "border-slate-200"}`}>
+            <input type="radio" name="delete_mode" checked={mode === "move"} onChange={() => setMode("move")} className="mt-1" />
+            <div className="w-full">
+              <p className="font-black text-blaben-950">نقل إلى تصنيف آخر</p>
+              {mode === "move" && (
+                <select value={targetCategory} onChange={(e) => setTargetCategory(e.target.value)} className="mt-2 w-full rounded-md border border-blue-100 p-2 text-sm">
+                  {categories.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </label>
+
+          <label className={`flex cursor-pointer gap-3 rounded-lg border p-3 ${mode === "delete" ? "border-red-500 bg-red-50" : "border-slate-200"}`}>
+            <input type="radio" name="delete_mode" checked={mode === "delete"} onChange={() => setMode("delete")} className="mt-1" />
+            <div>
+              <p className="font-black text-red-700">حذف المنتجات نهائياً</p>
+              <p className="text-sm text-red-600/80">سيتم حذف التصنيف وجميع المنتجات التي بداخله. (لا يمكن التراجع)</p>
+            </div>
+          </label>
+        </div>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg bg-slate-100 px-4 py-2 font-black text-slate-700 hover:bg-slate-200">إلغاء</button>
+          <button onClick={() => { onConfirm(mode, targetCategory); onClose(); }} className="rounded-lg bg-red-600 px-4 py-2 font-black text-white hover:bg-red-700">تأكيد الحذف</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AdminCategoryManager({ products, configured, session, onRenameCategory, onDeleteCategory, setMessage }) {
   const [drafts, setDrafts] = useState({});
   const [busy, setBusy] = useState("");
@@ -1625,7 +1709,59 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
     return map;
   }, [products]);
 
-  const categories = useMemo(() => Array.from(counts.keys()).sort((a, b) => a.localeCompare(b, "ar")), [counts]);
+  const [customOrder, setCustomOrder] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("blabenCategoryOrder") || "[]");
+    } catch {
+      return [];
+    }
+  });
+
+  const categories = useMemo(() => {
+    const arr = Array.from(counts.keys());
+    arr.sort((a, b) => {
+      const idxA = customOrder.indexOf(a);
+      const idxB = customOrder.indexOf(b);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b, "ar");
+    });
+    return arr;
+  }, [counts, customOrder]);
+
+  const saveOrder = (nextOrder) => {
+    localStorage.setItem("blabenCategoryOrder", JSON.stringify(nextOrder));
+    setCustomOrder(nextOrder);
+  };
+
+  const handleDragStart = (e, name) => {
+    e.dataTransfer.setData("text/plain", name);
+    e.currentTarget.classList.add("opacity-50");
+  };
+  
+  const handleDragEnd = (e) => {
+    e.currentTarget.classList.remove("opacity-50");
+  };
+
+  const handleDrop = (e, targetName) => {
+    e.preventDefault();
+    const sourceName = e.dataTransfer.getData("text/plain");
+    if (!sourceName || sourceName === targetName) return;
+    
+    const newArr = [...categories];
+    const srcIdx = newArr.indexOf(sourceName);
+    const tgtIdx = newArr.indexOf(targetName);
+    
+    newArr.splice(srcIdx, 1);
+    newArr.splice(tgtIdx, 0, sourceName);
+    
+    saveOrder(newArr);
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
 
   const saveCatImages = (next) => {
     localStorage.setItem("blabenCategoryImages", JSON.stringify(next));
@@ -1663,18 +1799,30 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
     setBusy("");
   };
 
-  const remove = async (name) => {
+  const [deleteTarget, setDeleteTarget] = useState(null);
+
+  const requestDelete = (name) => {
     const count = counts.get(name) || 0;
-    const warning = count
-      ? `يوجد ${count} منتج داخل هذا التصنيف. حذف التصنيف سينقلهم إلى تصنيف "غير مصنف" بدلاً من حذفهم. هل تريد المتابعة؟`
-      : `حذف تصنيف "${name}"؟`;
-    if (!window.confirm(warning)) return;
+    if (count > 0) {
+      setDeleteTarget(name);
+    } else {
+      if (window.confirm(`حذف تصنيف "${name}" نهائياً؟`)) {
+        performDelete(name, "delete", "");
+      }
+    }
+  };
+
+  const performDelete = async (name, mode, targetCategory) => {
     setBusy(name);
-    await onDeleteCategory(name);
+    await onDeleteCategory(name, mode, targetCategory);
     if (catImages[name]) {
       const next = { ...catImages };
       delete next[name];
       saveCatImages(next);
+    }
+    // Also remove from custom order
+    if (customOrder.includes(name)) {
+      saveOrder(customOrder.filter((c) => c !== name));
     }
     setBusy("");
   };
@@ -1683,16 +1831,26 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
     <section className="mt-6 grid gap-4">
       <div className="rounded-lg border border-blue-100 bg-white p-4 shadow-sm">
         <p className="text-sm leading-6 text-slate-500">
+          يمكنك <strong>سحب وإفلات</strong> التصنيفات لترتيبها كما تريد أن تظهر للزبائن.
           إعادة التسمية والحذف تطبَّق فوراً على كل المنتجات المرتبطة بهذا التصنيف
           {configured && session ? " (يُحفظ مباشرة في Supabase، وكل الأجهزة تشوف التغيير فوراً)" : " (يُحفظ محلياً فقط لأن Supabase غير مفعل حالياً)"}.
-          صور أغلفة التصنيفات حالياً تُحفظ على متصفح هذا الجهاز فقط وليست مشتركة بين الأجهزة بعد.
         </p>
       </div>
       {categories.length ? (
         <div className="grid gap-3">
           {categories.map((name) => (
-            <article key={name} className="grid gap-3 rounded-lg border border-blue-100 bg-white p-4 shadow-sm md:grid-cols-[72px_1fr_auto] md:items-center">
-              <div className="h-18 w-18 overflow-hidden rounded-lg bg-blaben-50">
+            <article 
+              key={name} 
+              draggable 
+              onDragStart={(e) => handleDragStart(e, name)}
+              onDragEnd={handleDragEnd}
+              onDragOver={handleDragOver}
+              onDrop={(e) => handleDrop(e, name)}
+              className="group flex flex-col gap-3 rounded-lg border border-blue-100 bg-white p-4 shadow-sm transition hover:border-blaben-200 hover:shadow-md md:flex-row md:items-center cursor-grab active:cursor-grabbing"
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-2xl text-slate-300 group-hover:text-blaben-500" title="سحب لترتيب التصنيف">⠿</span>
+                <div className="h-18 w-18 overflow-hidden rounded-lg bg-blaben-50">
                 <img
                   src={catImages[name] || asset(products.find((product) => product.category === name)?.image)}
                   alt=""
@@ -1701,15 +1859,17 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
                   className="h-18 w-18 object-cover"
                 />
               </div>
-              <div className="grid gap-2">
+              </div>
+              <div className="grid flex-1 gap-2">
                 <input
                   value={drafts[name] ?? name}
                   onChange={(event) => setDrafts({ ...drafts, [name]: event.target.value })}
-                  className="rounded-lg border border-blue-100 p-2 font-black text-blaben-950"
+                  className="w-full max-w-sm rounded-lg border border-blue-100 p-2 font-black text-blaben-950"
+                  onClick={(e) => e.stopPropagation()}
                 />
                 <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
                   <span>{counts.get(name)} منتج</span>
-                  <label className="cursor-pointer rounded-lg bg-blaben-50 px-3 py-1.5 font-black text-blaben-850">
+                  <label className="cursor-pointer rounded-lg bg-blaben-50 px-3 py-1.5 font-black text-blaben-850" onClick={(e) => e.stopPropagation()}>
                     تغيير صورة الغلاف
                     <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={(event) => event.target.files?.[0] && uploadCatImage(name, event.target.files[0])} />
                   </label>
@@ -1717,7 +1877,7 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
               </div>
               <div className="flex gap-2">
                 <button disabled={busy === name} onClick={() => rename(name)} className="rounded-lg bg-blaben-850 px-4 py-2 font-black text-white disabled:opacity-50">حفظ الاسم</button>
-                <button disabled={busy === name} onClick={() => remove(name)} className="rounded-lg bg-red-50 px-4 py-2 font-black text-red-600 disabled:opacity-50">حذف</button>
+                <button disabled={busy === name} onClick={() => requestDelete(name)} className="rounded-lg bg-red-50 px-4 py-2 font-black text-red-600 disabled:opacity-50">حذف</button>
               </div>
             </article>
           ))}
@@ -1725,6 +1885,13 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
       ) : (
         <p className="rounded-lg border border-dashed border-blue-100 bg-white p-5 text-slate-500">لا توجد تصنيفات بعد.</p>
       )}
+      <CategoryDeleteModal 
+        isOpen={Boolean(deleteTarget)} 
+        categoryName={deleteTarget} 
+        categories={categories.filter(c => c !== deleteTarget)} 
+        onClose={() => setDeleteTarget(null)} 
+        onConfirm={(mode, target) => performDelete(deleteTarget, mode, target)} 
+      />
     </section>
   );
 }
