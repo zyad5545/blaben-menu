@@ -1424,10 +1424,10 @@ function AdminPortal({ catalog }) {
   }
 
   return (
-    <main className="mx-auto w-[min(1180px,calc(100%-24px))] py-8">
+    <main className="mx-auto w-[min(1180px,calc(100%-16px))] py-6 px-1 sm:px-0">
       <section className="mb-5 rounded-lg border border-blue-100 bg-white p-5 shadow-sm">
         <p className="font-black text-blaben-700">بوابة الإدارة</p>
-        <h1 className="mt-2 text-4xl font-black text-blaben-950 md:text-6xl">إدارة المنيو</h1>
+        <h1 className="mt-2 text-2xl font-black text-blaben-950 sm:text-4xl md:text-6xl">إدارة المنيو</h1>
         <p className="mt-3 leading-7 text-slate-500">
           {configured ? "الوضع الآمن مفعل عبر Supabase. التعديلات تتطلب جلسة أدمن." : "Supabase غير مضبوط حالياً، لذلك هذه نسخة محلية للتجربة فقط وليست آمنة للنشر."}
         </p>
@@ -1439,7 +1439,7 @@ function AdminPortal({ catalog }) {
 
         {activeTab === "products" && (
           <div className="mt-4 flex flex-wrap gap-2">
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="بحث عن منتج..." className="min-w-64 flex-1 rounded-lg border border-blue-100 p-3" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="بحث عن منتج..." className="min-w-0 flex-1 rounded-lg border border-blue-100 p-3" />
             {configured && session && <button onClick={() => supabase.auth.signOut()} className="rounded-lg bg-blaben-100 px-4 py-3 font-black text-blaben-850">تسجيل خروج</button>}
           </div>
         )}
@@ -1815,6 +1815,15 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
     setDragIndex(null);
   };
 
+  // ── Move up/down for mobile (touch devices can't drag) ──
+  const moveCategory = (index, direction) => {
+    const target = index + direction;
+    if (target < 0 || target >= categories.length) return;
+    const reordered = [...categories];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    saveCatOrder(reordered);
+  };
+
   return (
     <section className="mt-6 grid gap-4">
       <div className="rounded-lg border border-blue-100 bg-white p-4 shadow-sm">
@@ -1833,39 +1842,42 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
               onDragStart={() => handleDragStart(index)}
               onDragOver={handleDragOver}
               onDrop={() => handleDrop(index)}
-              className={`grid gap-3 rounded-lg border bg-white p-4 shadow-sm transition md:grid-cols-[auto_72px_1fr_auto] md:items-center ${dragIndex === index ? "border-blaben-850 opacity-50" : "border-blue-100"}`}
+              className={`grid gap-3 rounded-lg border bg-white p-3 shadow-sm transition sm:p-4 ${dragIndex === index ? "border-blaben-850 opacity-50" : "border-blue-100"}`}
             >
-              {/* Drag handle */}
-              <div className="hidden cursor-grab select-none text-2xl text-slate-300 active:cursor-grabbing md:grid md:place-items-center" title="اسحب لتغيير الترتيب">⠿</div>
-              <div className="h-18 w-18 overflow-hidden rounded-lg bg-blaben-50">
-                <img
-                  src={catImages[name] || asset(products.find((product) => product.category === name)?.image)}
-                  alt=""
-                  loading="lazy"
-                  decoding="async"
-                  className="h-18 w-18 object-cover"
-                />
-              </div>
-              <div className="grid gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="rounded bg-blaben-100 px-2 py-0.5 text-xs font-black text-blaben-700">{index + 1}</span>
-                  <input
-                    value={drafts[name] ?? name}
-                    onChange={(event) => setDrafts({ ...drafts, [name]: event.target.value })}
-                    className="flex-1 rounded-lg border border-blue-100 p-2 font-black text-blaben-950"
+              {/* Mobile: top row with order + image + move buttons */}
+              <div className="flex items-center gap-3">
+                <span className="shrink-0 rounded bg-blaben-100 px-2 py-1 text-sm font-black text-blaben-700">{index + 1}</span>
+                <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-blaben-50 sm:h-18 sm:w-18">
+                  <img
+                    src={catImages[name] || asset(products.find((product) => product.category === name)?.image)}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    className="h-full w-full object-cover"
                   />
                 </div>
-                <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
-                  <span>{counts.get(name)} منتج</span>
-                  <label className="cursor-pointer rounded-lg bg-blaben-50 px-3 py-1.5 font-black text-blaben-850">
-                    تغيير صورة الغلاف
-                    <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={(event) => event.target.files?.[0] && uploadCatImage(name, event.target.files[0])} />
-                  </label>
+                <input
+                  value={drafts[name] ?? name}
+                  onChange={(event) => setDrafts({ ...drafts, [name]: event.target.value })}
+                  className="min-w-0 flex-1 rounded-lg border border-blue-100 p-2 text-sm font-black text-blaben-950 sm:text-base"
+                />
+                {/* Move up/down buttons (work on all devices including touch) */}
+                <div className="flex shrink-0 flex-col gap-1">
+                  <button type="button" disabled={index === 0} onClick={() => moveCategory(index, -1)} className="rounded bg-blaben-50 px-2 py-0.5 text-xs font-black text-blaben-700 disabled:opacity-30" title="تحريك لأعلى">▲</button>
+                  <button type="button" disabled={index === categories.length - 1} onClick={() => moveCategory(index, 1)} className="rounded bg-blaben-50 px-2 py-0.5 text-xs font-black text-blaben-700 disabled:opacity-30" title="تحريك لأسفل">▼</button>
                 </div>
               </div>
-              <div className="flex gap-2">
-                <button disabled={busy === name} onClick={() => rename(name)} className="rounded-lg bg-blaben-850 px-4 py-2 font-black text-white disabled:opacity-50">حفظ الاسم</button>
-                <button disabled={busy === name} onClick={() => remove(name)} className="rounded-lg bg-red-50 px-4 py-2 font-black text-red-600 disabled:opacity-50">حذف</button>
+              {/* Bottom row: meta info + actions */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-slate-500 sm:text-sm">{counts.get(name)} منتج</span>
+                <label className="cursor-pointer rounded-lg bg-blaben-50 px-2 py-1 text-xs font-black text-blaben-850 sm:px-3 sm:py-1.5 sm:text-sm">
+                  تغيير الصورة
+                  <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={(event) => event.target.files?.[0] && uploadCatImage(name, event.target.files[0])} />
+                </label>
+                <div className="flex gap-2 mr-auto">
+                  <button disabled={busy === name} onClick={() => rename(name)} className="rounded-lg bg-blaben-850 px-3 py-1.5 text-xs font-black text-white disabled:opacity-50 sm:px-4 sm:py-2 sm:text-sm">حفظ</button>
+                  <button disabled={busy === name} onClick={() => remove(name)} className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-black text-red-600 disabled:opacity-50 sm:px-4 sm:py-2 sm:text-sm">حذف</button>
+                </div>
               </div>
             </article>
           ))}
@@ -1927,28 +1939,35 @@ function AdminProductRow({ product, onUpdate, onDelete }) {
     setDraft({ ...draft, image: dataUrl });
   };
   return (
-    <article className="grid gap-3 rounded-lg border border-blue-100 bg-white p-3 shadow-sm md:grid-cols-[96px_1fr_auto]">
-      <div className="grid gap-2">
-        <img loading="lazy" decoding="async" src={asset(draft.image)} alt="" className="h-24 w-24 rounded-lg object-cover" />
-        <label className="cursor-pointer rounded-lg bg-blaben-50 px-2 py-1 text-center text-xs font-black text-blaben-850">
-          تغيير الصورة
-          <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={(event) => updateImage(event.target.files?.[0])} />
-        </label>
+    <article className="grid gap-3 rounded-lg border border-blue-100 bg-white p-3 shadow-sm">
+      {/* Mobile: image row */}
+      <div className="flex items-start gap-3">
+        <div className="grid shrink-0 gap-2">
+          <img loading="lazy" decoding="async" src={asset(draft.image)} alt="" className="h-16 w-16 rounded-lg object-cover sm:h-24 sm:w-24" />
+          <label className="cursor-pointer rounded-lg bg-blaben-50 px-2 py-1 text-center text-xs font-black text-blaben-850">
+            تغيير
+            <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={(event) => updateImage(event.target.files?.[0])} />
+          </label>
+        </div>
+        {/* Fields */}
+        <div className="grid min-w-0 flex-1 gap-2">
+          <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: limitText(e.target.value, 90) })} placeholder="اسم المنتج" className="w-full rounded-lg border border-blue-100 p-2 text-sm sm:text-base" />
+          <div className="grid grid-cols-2 gap-2">
+            <input value={draft.category} onChange={(e) => setDraft({ ...draft, category: limitText(e.target.value, 70) })} placeholder="التصنيف" className="rounded-lg border border-blue-100 p-2 text-sm sm:text-base" />
+            <input value={draft.price} onChange={(e) => setDraft({ ...draft, price: limitText(e.target.value, 60) })} placeholder="السعر" className="rounded-lg border border-blue-100 p-2 text-sm sm:text-base" />
+          </div>
+          <select value={draft.state} onChange={(e) => setDraft({ ...draft, state: e.target.value })} className="rounded-lg border border-blue-100 p-2 text-sm sm:text-base">
+            <option value="available">متاح</option>
+            <option value="unavailable">غير متاح</option>
+            <option value="coming_soon">قريبا</option>
+          </select>
+        </div>
       </div>
-      <div className="grid gap-2 md:grid-cols-2">
-        <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: limitText(e.target.value, 90) })} className="rounded-lg border border-blue-100 p-2" />
-        <input value={draft.category} onChange={(e) => setDraft({ ...draft, category: limitText(e.target.value, 70) })} className="rounded-lg border border-blue-100 p-2" />
-        <input value={draft.price} onChange={(e) => setDraft({ ...draft, price: limitText(e.target.value, 60) })} placeholder="السعر الأساسي" className="rounded-lg border border-blue-100 p-2" />
-        <select value={draft.state} onChange={(e) => setDraft({ ...draft, state: e.target.value })} className="rounded-lg border border-blue-100 p-2">
-          <option value="available">متاح</option>
-          <option value="unavailable">غير متاح</option><option value="coming_soon">قريبا</option>
-        </select>
-        <textarea value={draft.description || ""} onChange={(e) => setDraft({ ...draft, description: limitText(e.target.value, 500) })} className="rounded-lg border border-blue-100 p-2 md:col-span-2" rows="2" />
-        <VariantEditor variants={draft.variants} onChange={(next) => setDraft({ ...draft, variants: next })} />
-      </div>
-      <div className="flex gap-2 md:grid md:content-center">
-        <button onClick={() => onUpdate(product, draft)} className="rounded-lg bg-blaben-850 px-4 py-2 font-black text-white">حفظ</button>
-        <button onClick={() => onDelete(product)} className="rounded-lg bg-red-50 px-4 py-2 font-black text-red-600">حذف</button>
+      <textarea value={draft.description || ""} onChange={(e) => setDraft({ ...draft, description: limitText(e.target.value, 500) })} placeholder="الوصف" className="w-full rounded-lg border border-blue-100 p-2 text-sm sm:text-base" rows="2" />
+      <VariantEditor variants={draft.variants} onChange={(next) => setDraft({ ...draft, variants: next })} />
+      <div className="flex gap-2">
+        <button onClick={() => onUpdate(product, draft)} className="flex-1 rounded-lg bg-blaben-850 px-4 py-2 text-sm font-black text-white sm:flex-none sm:text-base">حفظ</button>
+        <button onClick={() => onDelete(product)} className="flex-1 rounded-lg bg-red-50 px-4 py-2 text-sm font-black text-red-600 sm:flex-none sm:text-base">حذف</button>
       </div>
     </article>
   );
