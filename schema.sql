@@ -27,14 +27,17 @@ create table if not exists admin_users (
 create table if not exists category_images (
   category text primary key,
   image_url text,
-  sort_order integer default 0,
+  sort_order integer,
   updated_at timestamptz default now()
 );
 
+-- Existing installs: allow categories to be saved without an image, and
+-- support syncing display order across devices via sort_order.
+alter table category_images alter column image_url drop not null;
+alter table category_images add column if not exists sort_order integer;
+
 alter table admin_users enable row level security;
 alter table category_images enable row level security;
-alter table category_images alter column image_url drop not null;
-alter table category_images add column if not exists sort_order integer default 0;
 
 drop policy if exists "admin users can read self" on admin_users;
 create policy "admin users can read self"

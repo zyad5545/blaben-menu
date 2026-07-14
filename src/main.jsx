@@ -11,7 +11,7 @@ const ADMIN_ROUTE = "/staff-portal-blaben-73.html";
 const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
 const EXTRAS_CATEGORY = "الاضافات";
-const FINAL_CATEGORY_ORDER = ["دنيا الرز", "دنيا القشطوطة", "منتجات جديدة", "تريندات دبي", "البمبوظة", "السلانكتيه", "دنيا ام علي", "كشري الحلو", EXTRAS_CATEGORY];
+const FINAL_CATEGORY_ORDER = ["دنيا الرز", "دنيا القطوطة", "منتجات جديدة", "تريندات دبي", "البمبوظة", "السلانكتيه", "دنيا ام علي", "كشري الحلو", EXTRAS_CATEGORY];
 const MENU_REVISION_KEY = "blabenMenuRevision";
 const MENU_EVENT = "blaben:menu-updated";
 const MENU_CHANNEL_NAME = "blaben-menu";
@@ -248,11 +248,11 @@ function isLikelyProductStart(line, nextLine = "") {
 
 function inferCategory(name) {
   const norm = normalizeArabic(name);
-  if (norm.includes("ارز")) return "دنيا الرز";
+  if (norm.includes("ارز")) return "دنيا الارز";
   if (norm.includes("قشطوط") || norm.includes("قسطوط")) return "دنيا القشطوطة";
-  if (norm.includes("كشري")) return "كشري الحلو";
+  if (norm.includes("كشري")) return "دينا الكشري";
   if (norm.includes("بمبو")) return "البمبوظة";
-  if (norm.includes("طاجن") || norm.includes("ام علي")) return "دنيا ام علي";
+  if (norm.includes("طاجن") || norm.includes("ام علي")) return "دنيا ام على";
   if (norm.includes("دبي") || norm.includes("كريب")) return "تريندات دبي";
   if (norm.includes("اللء")) return "اللؤة";
   if (norm.includes("كيك") || norm.includes("ماتيلدا") || norm.includes("كبسه") || norm.includes("كشخه") || norm.includes("متكندر")) return "دنيا الكيك";
@@ -406,33 +406,23 @@ function groupProducts(products) {
 
   const priority = FINAL_CATEGORY_ORDER;
 
-  let customCatOrder = [];
-  try {
-    customCatOrder = JSON.parse(localStorage.getItem("blabenCategoryOrder") || "[]");
-  } catch {}
+  // These localStorage reads are only ever used when Supabase itself isn't
+  // configured (offline/local-only mode). When Supabase IS configured, the
+  // categorySort/categoryImage fields already carried on each product (set
+  // in useCatalog via mergeCategoryImages) are the single source of truth,
+  // so every device/account sees the same thing.
+  let customCatImages = {};
+  let localCatOrder = [];
+  if (!supabase) {
+    try {
+      customCatImages = JSON.parse(localStorage.getItem("blabenCategoryImages") || "{}");
+    } catch {}
+    try {
+      localCatOrder = JSON.parse(localStorage.getItem("blabenCategoryOrder") || "[]");
+    } catch {}
+  }
 
   return [...map.entries()]
-    .sort(([a, aItems], [b, bItems]) => {
-      const aSort = aItems.find((p) => p.categorySort != null)?.categorySort;
-      const bSort = bItems.find((p) => p.categorySort != null)?.categorySort;
-
-      const aiCustom = customCatOrder.indexOf(a);
-      const biCustom = customCatOrder.indexOf(b);
-
-      const aFinalSort = aSort != null ? aSort : (aiCustom !== -1 ? aiCustom : undefined);
-      const bFinalSort = bSort != null ? bSort : (biCustom !== -1 ? biCustom : undefined);
-
-      if (aFinalSort !== undefined && bFinalSort !== undefined) return aFinalSort - bFinalSort;
-      if (aFinalSort !== undefined) return -1;
-      if (bFinalSort !== undefined) return 1;
-
-      const ai = priority.indexOf(a);
-      const bi = priority.indexOf(b);
-      if (ai !== -1 && bi !== -1) return ai - bi;
-      if (ai !== -1) return -1;
-      if (bi !== -1) return 1;
-      return 0;
-    })
     .map(([name, items]) => {
       // Sort items first so the fallback image is always deterministic
       // (same product every time, regardless of Supabase fetch order).
@@ -443,11 +433,35 @@ function groupProducts(products) {
         // Stable tie-breaker: alphabetical by name, then by UUID
         return (a.name || "").localeCompare(b.name || "") || String(a.uuid || "").localeCompare(String(b.uuid || ""));
       });
+      const categorySort = sorted.find((p) => p.categorySort != null)?.categorySort ?? null;
       // Category image priority:
       // 1. Explicit category image from category_images table (via mergeCategoryImages)
-      // 2. Deterministic fallback: first product image by sort order
-      const catImage = sorted.find((p) => p.categoryImage)?.categoryImage || sorted[0]?.image;
-      return { name, items: sorted, image: catImage };
+      // 2. Custom image saved in localStorage — only reachable when Supabase isn't configured
+      // 3. Deterministic fallback: first product image by sort order
+      const catImage = sorted.find((p) => p.categoryImage)?.categoryImage || customCatImages[name] || sorted[0]?.image;
+      return { name, items: sorted, image: catImage, categorySort };
+    })
+    .sort((a, b) => {
+      // 1. Explicit sort_order synced from Supabase (or, offline only, the
+      //    locally-dragged order) always wins when present on both sides.
+      if (a.categorySort != null && b.categorySort != null) return a.categorySort - b.categorySort;
+      if (a.categorySort != null) return -1;
+      if (b.categorySort != null) return 1;
+      if (!supabase && localCatOrder.length) {
+        const ai = localCatOrder.indexOf(a.name);
+        const bi = localCatOrder.indexOf(b.name);
+        if (ai !== -1 && bi !== -1) return ai - bi;
+        if (ai !== -1) return -1;
+        if (bi !== -1) return 1;
+      }
+      // 2. Fall back to the intentional default order for categories nobody
+      //    has explicitly reordered yet.
+      const ai = priority.indexOf(a.name);
+      const bi = priority.indexOf(b.name);
+      if (ai !== -1 && bi !== -1) return ai - bi;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return 0;
     });
 }
 
@@ -494,11 +508,11 @@ function dedupeProducts(products) {
   });
 }
 
-function mergeCategoryImages(products, categoryImageMap = new Map(), categorySortMap = new Map()) {
+function mergeCategoryImages(products, categoryImageMap = new Map(), categoryOrderMap = new Map()) {
   return products.map((product) => ({
     ...product,
     categoryImage: categoryImageMap.get(product.category) || product.categoryImage || "",
-    categorySort: categorySortMap.get(product.category),
+    categorySort: categoryOrderMap.has(product.category) ? categoryOrderMap.get(product.category) : null,
   }));
 }
 
@@ -560,12 +574,20 @@ function useCatalog() {
       );
       const savedCategoryImages = categoryResponse.error
         ? new Map()
-        : new Map((categoryResponse.data || []).map((row) => [row.category, row.image_url]));
+        : new Map(
+            (categoryResponse.data || [])
+              .filter((row) => row.image_url)
+              .map((row) => [row.category, row.image_url])
+          );
       const categoryImageMap = new Map([...defaultCategoryImages, ...savedCategoryImages]);
-      const categorySortMap = categoryResponse.error
+      const categoryOrderMap = categoryResponse.error
         ? new Map()
-        : new Map((categoryResponse.data || []).filter(row => row.sort_order != null).map((row) => [row.category, row.sort_order]));
-      setCatalog(dedupeProducts(mergeCategoryImages(products, categoryImageMap, categorySortMap)));
+        : new Map(
+            (categoryResponse.data || [])
+              .filter((row) => row.sort_order != null)
+              .map((row) => [row.category, row.sort_order])
+          );
+      setCatalog(dedupeProducts(mergeCategoryImages(products, categoryImageMap, categoryOrderMap)));
     }
 
     loadFromSupabase();
@@ -1385,6 +1407,22 @@ function AdminPortal({ catalog }) {
     publishMenuChange();
   };
 
+  // Persists category display order to Supabase so it's shared across every
+  // device/account, not just cached locally in one browser.
+  const upsertCategoryOrder = async (orderedCategories) => {
+    if (!(configured && session && supabase)) {
+      throw new Error("not-authenticated");
+    }
+    const rows = orderedCategories.map((category, index) => ({
+      category,
+      sort_order: index,
+      updated_at: new Date().toISOString(),
+    }));
+    const { error } = await supabase.from("category_images").upsert(rows);
+    if (error) throw error;
+    publishMenuChange();
+  };
+
   const deleteCategoryImage = async (category) => {
     if (!(configured && session && supabase)) return;
     const { error } = await supabase.from("category_images").delete().eq("category", category);
@@ -1699,7 +1737,7 @@ function AdminPortal({ catalog }) {
           </section>
         </>
       ) : (
-        <AdminCategoryManager products={source} configured={configured} session={session} onRenameCategory={renameCategory} onDeleteCategory={deleteCategory} notify={notify} upsertCategoryImage={upsertCategoryImage} deleteCategoryImage={deleteCategoryImage} uploadImage={uploadImage} />
+        <AdminCategoryManager products={source} configured={configured} session={session} onRenameCategory={renameCategory} onDeleteCategory={deleteCategory} notify={notify} upsertCategoryImage={upsertCategoryImage} upsertCategoryOrder={upsertCategoryOrder} deleteCategoryImage={deleteCategoryImage} uploadImage={uploadImage} />
       )}
     </main>
   );
@@ -1763,9 +1801,6 @@ function AdminCreateForm({ categories, items, saveLocal, configured, session, no
       }
       try {
         categoryImage = await uploadImage(catFile, "categories");
-        const stored = JSON.parse(localStorage.getItem("blabenCategoryImages") || "{}");
-        stored[categoryName] = categoryImage;
-        localStorage.setItem("blabenCategoryImages", JSON.stringify(stored));
       } catch (e) {
         console.error("Could not save category image", e);
         notify("تعذر رفع صورة التصنيف. تحقق من إعدادات Supabase Storage.", "error");
@@ -1813,12 +1848,20 @@ function AdminCreateForm({ categories, items, saveLocal, configured, session, no
       saveLocal([...items, { ...product, state: product.state }]);
     }
     if (isNewCategory && catFile && catFile.size) {
-      try {
-        await upsertCategoryImage(categoryName, categoryImage);
-        notify("تم حفظ صورة التصنيف بنجاح.", "success");
-      } catch (error) {
-        console.error("Could not persist category image", error);
-        notify("تم حفظ المنتج، لكن تعذر مزامنة صورة التصنيف مع الخادم.", "error");
+      if (configured && session) {
+        try {
+          await upsertCategoryImage(categoryName, categoryImage);
+          notify("تم حفظ صورة التصنيف بنجاح.", "success");
+        } catch (error) {
+          console.error("Could not persist category image", error);
+          notify("تم حفظ المنتج، لكن تعذر مزامنة صورة التصنيف مع الخادم.", "error");
+        }
+      } else {
+        // No Supabase session available: localStorage is the only place this
+        // can live, so this is a genuine fallback rather than a stale cache.
+        const stored = JSON.parse(localStorage.getItem("blabenCategoryImages") || "{}");
+        stored[categoryName] = categoryImage;
+        localStorage.setItem("blabenCategoryImages", JSON.stringify(stored));
       }
     }
     
@@ -1940,7 +1983,7 @@ function CategoryDeleteModal({ name, count, categories, onClose, onConfirm }) {
   );
 }
 
-function AdminCategoryManager({ products, configured, session, onRenameCategory, onDeleteCategory, notify, upsertCategoryImage, deleteCategoryImage, uploadImage }) {
+function AdminCategoryManager({ products, configured, session, onRenameCategory, onDeleteCategory, notify, upsertCategoryImage, upsertCategoryOrder, deleteCategoryImage, uploadImage }) {
   const [drafts, setDrafts] = useState({});
   const [busy, setBusy] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -1975,24 +2018,18 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
     return ordered;
   }, [counts, catOrder]);
 
+  // Local cache is kept only so THIS admin's screen updates instantly and
+  // still works when Supabase isn't configured. The public menu no longer
+  // trusts this cache — it reads sort_order/image_url from Supabase.
   const saveCatOrder = async (next) => {
     localStorage.setItem("blabenCategoryOrder", JSON.stringify(next));
     setCatOrder(next);
-    if (configured && session && supabase) {
-      try {
-        const { data: existing } = await supabase.from("category_images").select("category, image_url");
-        const existingMap = new Map((existing || []).map(r => [r.category, r.image_url]));
-        const updates = next.map((cat, idx) => ({
-          category: cat,
-          sort_order: idx,
-          ...(existingMap.has(cat) && existingMap.get(cat) != null ? { image_url: existingMap.get(cat) } : {})
-        }));
-        const { error } = await supabase.from("category_images").upsert(updates);
-        if (error) console.error("Failed to save category order to Supabase", error);
-        else publishMenuChange();
-      } catch (err) {
-        console.error("Failed to save category order", err);
-      }
+    if (!(configured && session)) return;
+    try {
+      await upsertCategoryOrder(next);
+    } catch (error) {
+      console.error("Could not sync category order", error);
+      notify("تعذر مزامنة ترتيب التصنيفات مع الخادم. الترتيب محفوظ على هذا الجهاز فقط.", "error");
     }
   };
 
@@ -2008,12 +2045,14 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
     }
     try {
       const imageUrl = await uploadImage(file, "categories");
-      saveCatImages({ ...catImages, [name]: imageUrl });
+      // Confirm the remote save BEFORE caching locally, so a failed/expired
+      // session never leaves this device showing an image nobody else sees.
       await upsertCategoryImage(name, imageUrl);
+      saveCatImages({ ...catImages, [name]: imageUrl });
       notify("تم حفظ صورة التصنيف بنجاح.", "success");
     } catch (error) {
       console.error("Could not persist category image", error);
-      notify("تعذر رفع صورة التصنيف. تحقق من إعدادات Supabase Storage.", "error");
+      notify("تعذر رفع صورة التصنيف. تحقق من تسجيل الدخول وإعدادات Supabase.", "error");
     }
   };
 
