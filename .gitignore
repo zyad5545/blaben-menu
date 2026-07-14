@@ -7,7 +7,11 @@ backups/
 *.log
 *.tmp
 *.zip
+*.xlsx
 refactor*.js
 refactor*.cjs
+images/
+public/backup/
 New folder/
 New folder.zip
+vite-*.log

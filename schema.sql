@@ -7,7 +7,7 @@ create table if not exists products (
   category text not null,
   name text not null,
   price text not null,
-  state text not null default 'available' check (state in ('available', 'unavailable', 'special_offer')),
+  state text not null default 'available' check (state in ('available', 'unavailable', 'special_offer', 'coming_soon')),
   description text default '',
   image_url text,
   variants jsonb not null default '[]'::jsonb,
@@ -17,7 +17,7 @@ create table if not exists products (
 
 alter table products add column if not exists variants jsonb not null default '[]'::jsonb;
 alter table products drop constraint if exists products_state_check;
-alter table products add constraint products_state_check check (state in ('available', 'unavailable', 'special_offer'));
+alter table products add constraint products_state_check check (state in ('available', 'unavailable', 'special_offer', 'coming_soon'));
 
 create table if not exists admin_users (
   user_id uuid primary key references auth.users(id) on delete cascade,

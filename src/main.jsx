@@ -10,6 +10,7 @@ const NEW = "منتجات جديدة";
 const ADMIN_ROUTE = "/staff-portal-blaben-73.html";
 const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
+const FINAL_CATEGORY_ORDER = ["دنيا الرز", "دنيا القطوطة", "منتجات جديدة", "تريندات دبي", "البمبوظة", "السلانكتيه", "دنيا ام علي", "كشري الحلو"];
 // The "coming soon" state label used in badges across the menu.
 const COMING_SOON_LABEL = "قريبا";
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -153,7 +154,7 @@ function isSafeImageSrc(src) {
   const value = String(src || "");
   if (value.startsWith("data:image/")) return /^data:image\/(png|jpeg|jpg|webp|gif);base64,[a-z0-9+/=]+$/i.test(value);
   if (value.startsWith("https://")) return true;
-  return productImages.includes(value) || value === "b.laben logo.jfif" || value === SPECIAL_OFFER_BADGE;
+  return /^[^\\/:*?"<>|]+?\.(?:png|jpe?g|jfif|webp|gif)$/i.test(value);
 }
 
 function normalizeArabic(value) {
@@ -366,12 +367,7 @@ function groupProducts(products) {
     map.get(product.category).push(product);
   });
 
-  // Load admin-set category order; fall back to legacy hardcoded priority
-  let savedOrder = [];
-  try {
-    savedOrder = JSON.parse(localStorage.getItem("blabenCategoryOrder") || "[]");
-  } catch {}
-  const priority = savedOrder.length ? savedOrder : [OFFERS, NEW, "الأكثر طلبا"];
+  const priority = FINAL_CATEGORY_ORDER;
 
   let customCatImages = {};
   try {
@@ -387,13 +383,34 @@ function groupProducts(products) {
       if (bi !== -1) return 1;
       return 0;
     })
-    .map(([name, items]) => ({ name, items, image: customCatImages[name] || items[0]?.image }));
+    .map(([name, items]) => ({
+      name,
+      items: [...items].sort((a, b) => (a.sort ?? a.sort_order ?? a.id ?? 0) - (b.sort ?? b.sort_order ?? b.id ?? 0)),
+      image: customCatImages[name] || items.find((item) => item.categoryImage)?.categoryImage || items[0]?.image,
+    }));
 }
 
-// Source of truth for the PUBLIC menu. If Supabase is configured, the live
-// products table is what customers see — this is what makes admin edits
-// actually show up. Falls back to the old static text-file catalog only
-// when Supabase isn't configured (local dev without credentials).
+function normalizeStaticMenu(data) {
+  const categoryImages = new Map((data?.categories || []).map((category) => [category.name, category.image]));
+  return (data?.products || [])
+    .filter((product) => FINAL_CATEGORY_ORDER.includes(product.category))
+    .map((product, index) => ({
+      id: product.id || index,
+      name: limitText(product.name, 90),
+      category: product.category,
+      price: limitText(product.price, 60),
+      description: limitText(product.description || "", 700),
+      state: ["available", "unavailable", "special_offer", "coming_soon"].includes(product.state) ? product.state : "available",
+      image: isSafeImageSrc(product.image) ? product.image : "b.laben logo.jfif",
+      categoryImage: isSafeImageSrc(categoryImages.get(product.category)) ? categoryImages.get(product.category) : "",
+      sort: Number(product.sort ?? index),
+      variants: Array.isArray(product.variants) ? product.variants : [],
+    }));
+}
+
+// Source of truth for the PUBLIC menu. The Excel-generated JSON is the safe
+// fallback. Supabase is used only when it contains the final category model,
+// so an older database import cannot override the final menu.
 function useCatalog() {
   const [catalog, setCatalog] = useState([]);
 
@@ -401,10 +418,18 @@ function useCatalog() {
     let ignore = false;
 
     function loadStaticFallback() {
-      fetch("/names_and_descriptons.txt", { cache: "no-store" })
-        .then((res) => res.text())
-        .then((text) => !ignore && setCatalog(buildCatalog(parseMenu(text))))
-        .catch(() => !ignore && setCatalog(buildCatalog([])));
+      fetch("/menu-data.json", { cache: "no-store" })
+        .then((res) => {
+          if (!res.ok) throw new Error("menu-data missing");
+          return res.json();
+        })
+        .then((data) => !ignore && setCatalog(normalizeStaticMenu(data)))
+        .catch(() => {
+          fetch("/names_and_descriptons.txt", { cache: "no-store" })
+            .then((res) => res.text())
+            .then((text) => !ignore && setCatalog(buildCatalog(parseMenu(text))))
+            .catch(() => !ignore && setCatalog(buildCatalog([])));
+        });
     }
 
     if (!supabase) {
@@ -421,7 +446,12 @@ function useCatalog() {
         loadStaticFallback();
         return;
       }
-      setCatalog(data.map((row, index) => fromSupabaseProduct(row, index)));
+      const products = data.map((row, index) => fromSupabaseProduct(row, index));
+      if (!products.every((product) => FINAL_CATEGORY_ORDER.includes(product.category))) {
+        loadStaticFallback();
+        return;
+      }
+      setCatalog(products);
     }
 
     loadFromSupabase();
@@ -1366,10 +1396,14 @@ function AdminPortal({ catalog }) {
   const importStaticMenu = async () => {
     setMessage("جاري الاستيراد...");
     try {
-      const res = await fetch("/names_and_descriptons.txt", { cache: "no-store" });
-      const text = await res.text();
-      const parsed = buildCatalog(parseMenu(text));
-      const rows = parsed.map((product) => toSupabaseProduct(product));
+      const res = await fetch("/menu-data.json", { cache: "no-store" });
+      const menuData = await res.json();
+      const rows = normalizeStaticMenu(menuData).map((product) => toSupabaseProduct(product));
+      const { error: deleteError } = await supabase.from("products").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      if (deleteError) {
+        setMessage("تعذر مسح بيانات Supabase القديمة: " + deleteError.message);
+        return;
+      }
       const { error } = await supabase.from("products").insert(rows);
       if (error) {
         setMessage("تعذر الاستيراد: " + error.message);
@@ -1377,7 +1411,7 @@ function AdminPortal({ catalog }) {
       }
       const { data } = await supabase.from("products").select("*").order("sort_order", { ascending: true });
       setItems((data || []).map((row, index) => fromSupabaseProduct(row, index)));
-      setMessage(`تم استيراد ${rows.length} منتج بنجاح. المنيو العام يعرض الآن بيانات Supabase.`);
+      setMessage(`تم استبدال بيانات Supabase بـ ${rows.length} منتج من ملف Excel النهائي.`);
     } catch {
       setMessage("حدث خطأ أثناء الاستيراد.");
     }
@@ -1409,7 +1443,7 @@ function AdminPortal({ catalog }) {
               <summary className="cursor-pointer font-black text-slate-700">🛠 Debug Info (dev only)</summary>
               <div className="mt-2 grid gap-1 font-mono">
                 <p><strong>Supabase URL:</strong> {supabaseUrl || "❌ MISSING"}</p>
-                <p><strong>Anon Key:</strong> {supabaseAnonKey ? `${supabaseAnonKey.slice(0, 20)}...` : "❌ MISSING"}</p>
+                <p><strong>Anon Key:</strong> {supabaseAnonKey ? "موجود" : "❌ MISSING"}</p>
                 <p><strong>Connection:</strong> {connectionError ? "❌ Failed" : "✅ OK"}</p>
                 <p><strong>Session:</strong> {session ? "✅ Active" : "❌ None"}</p>
                 <p><strong>User ID:</strong> {session?.user?.id || "—"}</p>
@@ -1446,10 +1480,10 @@ function AdminPortal({ catalog }) {
         
         {message && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm font-bold text-amber-700">{message}</p>}
 
-        {configured && session && items.length === 0 && (
+        {configured && session && (
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
-            <p className="font-black text-amber-800">جدول المنتجات في Supabase فارغ حالياً، والمنيو الذي يظهر للزبائن مبني على الملف الثابت القديم.</p>
-            <button onClick={importStaticMenu} className="mt-3 rounded-lg bg-amber-600 px-4 py-2 font-black text-white">استيراد المنيو الحالي إلى Supabase (مرة واحدة)</button>
+            <p className="font-black text-amber-800">يمكنك استبدال بيانات Supabase بالمنيو النهائي المستخرج من ملف Excel. هذا يمسح المنتجات القديمة ثم يضيف المنتجات النهائية.</p>
+            <button onClick={importStaticMenu} className="mt-3 rounded-lg bg-amber-600 px-4 py-2 font-black text-white">استبدال Supabase بالمنيو النهائي</button>
           </div>
         )}
       </section>
@@ -1494,9 +1528,9 @@ function toSupabaseProduct(product) {
     category: limitText(product.category, 70),
     price: limitText(product.price, 60),
     description: limitText(product.description || "", 500),
-    state: ["available", "unavailable", "coming_soon"].includes(product.state) ? product.state : "available",
+    state: ["available", "unavailable", "special_offer", "coming_soon"].includes(product.state) ? product.state : "available",
     image_url: isSafeImageSrc(product.image) ? product.image : "b.laben logo.jfif",
-    sort_order: product.sort_order || 0,
+    sort_order: product.sort_order ?? product.sort ?? 0,
     variants: Array.isArray(product.variants)
       ? product.variants.map((variant) => ({
           label: limitText(variant.label, 40),
