@@ -10,7 +10,8 @@ const NEW = "منتجات جديدة";
 const ADMIN_ROUTE = "/staff-portal-blaben-73.html";
 const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
-const FINAL_CATEGORY_ORDER = ["دنيا الرز", "دنيا القطوطة", "منتجات جديدة", "تريندات دبي", "البمبوظة", "السلانكتيه", "دنيا ام علي", "كشري الحلو"];
+const EXTRAS_CATEGORY = "الاضافات";
+const FINAL_CATEGORY_ORDER = ["دنيا الرز", "دنيا القطوطة", "منتجات جديدة", "تريندات دبي", "البمبوظة", "السلانكتيه", "دنيا ام علي", "كشري الحلو", EXTRAS_CATEGORY];
 // The "coming soon" state label used in badges across the menu.
 const COMING_SOON_LABEL = "قريبا";
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -392,7 +393,7 @@ function groupProducts(products) {
 
 function normalizeStaticMenu(data) {
   const categoryImages = new Map((data?.categories || []).map((category) => [category.name, category.image]));
-  return (data?.products || [])
+  const mainProducts = (data?.products || [])
     .filter((product) => FINAL_CATEGORY_ORDER.includes(product.category))
     .map((product, index) => ({
       id: product.id || index,
@@ -406,6 +407,27 @@ function normalizeStaticMenu(data) {
       sort: Number(product.sort ?? index),
       variants: Array.isArray(product.variants) ? product.variants : [],
     }));
+  const extras = (data?.addons || [])
+    .filter((product) => Boolean(product?.name))
+    .map((product, index) => ({
+      id: product.id || `addon-${index}`,
+      name: limitText(product.name, 90),
+      category: EXTRAS_CATEGORY,
+      price: limitText(product.price, 60),
+      description: limitText(product.description || "", 700),
+      state: ["available", "unavailable", "special_offer", "coming_soon"].includes(product.state) ? product.state : "available",
+      image: isSafeImageSrc(product.image) ? product.image : "b.laben logo.jfif",
+      categoryImage: isSafeImageSrc(categoryImages.get(EXTRAS_CATEGORY)) ? categoryImages.get(EXTRAS_CATEGORY) : "",
+      sort: Number(product.sort ?? 1000 + index),
+      variants: Array.isArray(product.variants) ? product.variants : [],
+    }));
+  return [...mainProducts, ...extras];
+}
+
+async function loadMenuData() {
+  const res = await fetch("/menu-data.json", { cache: "no-store" });
+  if (!res.ok) throw new Error("menu-data missing");
+  return res.json();
 }
 
 // Source of truth for the PUBLIC menu. The Excel-generated JSON is the safe
@@ -418,11 +440,7 @@ function useCatalog() {
     let ignore = false;
 
     function loadStaticFallback() {
-      fetch("/menu-data.json", { cache: "no-store" })
-        .then((res) => {
-          if (!res.ok) throw new Error("menu-data missing");
-          return res.json();
-        })
+      loadMenuData()
         .then((data) => !ignore && setCatalog(normalizeStaticMenu(data)))
         .catch(() => {
           fetch("/names_and_descriptons.txt", { cache: "no-store" })
@@ -447,11 +465,16 @@ function useCatalog() {
         return;
       }
       const products = data.map((row, index) => fromSupabaseProduct(row, index));
-      if (!products.every((product) => FINAL_CATEGORY_ORDER.includes(product.category))) {
-        loadStaticFallback();
-        return;
+      try {
+        const menuData = await loadMenuData();
+        const extras = normalizeStaticMenu(menuData).filter((product) => product.category === EXTRAS_CATEGORY);
+        const merged = extras.length && !products.some((product) => product.category === EXTRAS_CATEGORY)
+          ? [...products, ...extras]
+          : products;
+        setCatalog(merged);
+      } catch {
+        setCatalog(products);
       }
-      setCatalog(products);
     }
 
     loadFromSupabase();
@@ -1203,6 +1226,7 @@ function AdminPortal({ catalog }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [messageKind, setMessageKind] = useState("neutral");
   const [query, setQuery] = useState("");
   const [activeTab, setActiveTab] = useState("products");
   const [connectionError, setConnectionError] = useState(false);
@@ -1210,6 +1234,32 @@ function AdminPortal({ catalog }) {
   const configured = Boolean(supabase);
   const source = configured ? items : items.length ? items : catalog;
   const filtered = query.trim() ? source.filter((product) => productMatches(product, query)) : source;
+
+  const notify = (text, kind = "neutral") => {
+    setMessage(text);
+    setMessageKind(kind);
+  };
+
+  const persistItems = (next) => {
+    const safe = next.map((product, index) => {
+      const row = toSupabaseProduct(product);
+      return {
+        id: product.id || index,
+        uuid: product.uuid,
+        name: row.name,
+        category: row.category,
+        price: row.price,
+        description: row.description,
+        state: row.state,
+        image: row.image_url,
+        sort_order: row.sort_order,
+        variants: row.variants,
+      };
+    });
+    localStorage.setItem(CUSTOM_KEY, JSON.stringify(safe));
+    setItems(safe);
+    return safe;
+  };
 
   // Verify that a user exists in admin_users table
   const verifyAdmin = async (userId) => {
@@ -1227,13 +1277,13 @@ function AdminPortal({ catalog }) {
     if (!supabase) return;
     const initSession = async () => {
       try {
-        const { data, error } = await supabase.auth.getSession();
-        if (error) {
-          console.error("getSession error:", error);
-          setConnectionError(true);
-          setMessage("تعذر الاتصال بـ Supabase.");
-          return;
-        }
+      const { data, error } = await supabase.auth.getSession();
+      if (error) {
+        console.error("getSession error:", error);
+        setConnectionError(true);
+        notify("تعذر الاتصال بـ Supabase.", "error");
+        return;
+      }
         console.log("Restored session:", data.session);
         if (data.session) {
           // Verify admin status on session restore
@@ -1242,7 +1292,7 @@ function AdminPortal({ catalog }) {
             console.warn("Session user is not an admin. Signing out.");
             await supabase.auth.signOut();
             setSession(null);
-            setMessage("الحساب ليس مسؤولاً. تم تسجيل الخروج.");
+            notify("الحساب ليس مسؤولاً. تم تسجيل الخروج.", "error");
             return;
           }
           setSession(data.session);
@@ -1250,7 +1300,7 @@ function AdminPortal({ catalog }) {
       } catch (err) {
         console.error("Supabase connection failed:", err);
         setConnectionError(true);
-        setMessage("تعذر الاتصال بـ Supabase. تحقق من إعدادات المشروع.");
+        notify("تعذر الاتصال بـ Supabase. تحقق من إعدادات المشروع.", "error");
       }
     };
     initSession();
@@ -1270,7 +1320,7 @@ function AdminPortal({ catalog }) {
       .order("sort_order", { ascending: true })
       .then(({ data, error }) => {
         if (error) {
-          setMessage("تعذر تحميل بيانات Supabase. راجع إعدادات الجدول والسياسات.");
+          notify("تعذر تحميل بيانات Supabase. راجع إعدادات الجدول والسياسات.", "error");
           return;
         }
         setItems((data || []).map(fromSupabaseProduct));
@@ -1280,6 +1330,7 @@ function AdminPortal({ catalog }) {
   const login = async (event) => {
     event.preventDefault();
     setMessage("");
+    setMessageKind("neutral");
     if (!supabase) return;
     setIsLoggingIn(true);
     try {
@@ -1287,7 +1338,7 @@ function AdminPortal({ catalog }) {
       console.log("Login result:", { session: authData?.session, error });
       if (error) {
         console.error("Login error:", error);
-        setMessage(mapSupabaseError(error.message));
+        notify(mapSupabaseError(error.message), "error");
         return;
       }
       // Verify admin authorization
@@ -1295,47 +1346,33 @@ function AdminPortal({ catalog }) {
       console.log("Admin verification:", { userId: authData.session.user.id, isAdmin });
       if (!isAdmin) {
         await supabase.auth.signOut();
-        setMessage("هذا الحساب ليس مسؤولاً.");
+        notify("هذا الحساب ليس مسؤولاً.", "error");
         return;
       }
       setSession(authData.session);
     } catch (err) {
       console.error("Login exception:", err);
-      setMessage("تعذر الاتصال بالخادم. حاول مرة أخرى.");
+      notify("تعذر الاتصال بالخادم. حاول مرة أخرى.", "error");
     } finally {
       setIsLoggingIn(false);
     }
   };
 
   const saveLocal = (next) => {
-    const safe = next.map((product, index) => {
-      const row = toSupabaseProduct(product);
-      return {
-        id: product.id || index,
-        uuid: product.uuid,
-        name: row.name,
-        category: row.category,
-        price: row.price,
-        description: row.description,
-        state: row.state,
-        image: row.image_url,
-        sort_order: row.sort_order,
-        variants: row.variants,
-      };
-    });
-    localStorage.setItem(CUSTOM_KEY, JSON.stringify(safe));
-    setItems(safe);
+    persistItems(next);
+    notify("تم الحفظ بنجاح.", "success");
   };
 
   const removeProduct = async (product) => {
     if (configured && session && product.uuid) {
       const { error } = await supabase.from("products").delete().eq("id", product.uuid);
       if (error) {
-        setMessage("تعذر حذف المنتج من Supabase.");
+        notify("تعذر حذف المنتج من Supabase.", "error");
         return;
       }
     }
-    saveLocal(items.filter((item) => item.id !== product.id && item.uuid !== product.uuid));
+    persistItems(items.filter((item) => item.id !== product.id && item.uuid !== product.uuid));
+    notify("تم حذف المنتج بنجاح.", "success");
   };
 
   const updateProduct = async (product, patch) => {
@@ -1343,21 +1380,23 @@ function AdminPortal({ catalog }) {
     if (configured && session && product.uuid) {
       const { error } = await supabase.from("products").update(toSupabaseProduct(nextProduct)).eq("id", product.uuid);
       if (error) {
-        setMessage("تعذر حفظ التعديل في Supabase.");
+        notify("تعذر حفظ التعديل في Supabase.", "error");
         return;
       }
     }
-    saveLocal(items.map((item) => (item.id === product.id || item.uuid === product.uuid ? nextProduct : item)));
+    persistItems(items.map((item) => (item.id === product.id || item.uuid === product.uuid ? nextProduct : item)));
+    notify("تم حفظ التعديل بنجاح.", "success");
   };
 
   const renameCategory = async (oldName, newName) => {
     if (configured && session) {
       const { error } = await supabase.from("products").update({ category: newName }).eq("category", oldName);
       if (error) {
-        setMessage("تعذر إعادة تسمية التصنيف في Supabase.");
+        notify("تعذر إعادة تسمية التصنيف في Supabase.", "error");
         return;
       }
-      setItems(items.map((item) => (item.category === oldName ? { ...item, category: newName } : item)));
+      persistItems(items.map((item) => (item.category === oldName ? { ...item, category: newName } : item)));
+      notify("تم حفظ التصنيف الجديد بنجاح.", "success");
     } else {
       saveLocal(items.map((item) => (item.category === oldName ? { ...item, category: newName } : item)));
     }
@@ -1370,10 +1409,11 @@ function AdminPortal({ catalog }) {
       if (configured && session) {
         const { error } = await supabase.from("products").delete().eq("category", name);
         if (error) {
-          setMessage("تعذر حذف منتجات التصنيف من Supabase.");
+          notify("تعذر حذف منتجات التصنيف من Supabase.", "error");
           return;
         }
-        setItems(items.filter((item) => item.category !== name));
+        persistItems(items.filter((item) => item.category !== name));
+        notify("تم حذف التصنيف بنجاح.", "success");
       } else {
         saveLocal(items.filter((item) => item.category !== name));
       }
@@ -1383,37 +1423,43 @@ function AdminPortal({ catalog }) {
       if (configured && session) {
         const { error } = await supabase.from("products").update({ category: moveTo }).eq("category", name);
         if (error) {
-          setMessage("تعذر نقل المنتجات في Supabase.");
+          notify("تعذر نقل المنتجات في Supabase.", "error");
           return;
         }
-        setItems(items.map((item) => (item.category === name ? { ...item, category: moveTo } : item)));
+        persistItems(items.map((item) => (item.category === name ? { ...item, category: moveTo } : item)));
+        notify("تم تحديث التصنيف بنجاح.", "success");
       } else {
         saveLocal(items.map((item) => (item.category === name ? { ...item, category: moveTo } : item)));
       }
     }
   };
 
-  const importStaticMenu = async () => {
-    setMessage("جاري الاستيراد...");
+  const syncExtras = async () => {
+    notify("جاري مزامنة الإضافات...", "neutral");
     try {
-      const res = await fetch("/menu-data.json", { cache: "no-store" });
-      const menuData = await res.json();
-      const rows = normalizeStaticMenu(menuData).map((product) => toSupabaseProduct(product));
-      const { error: deleteError } = await supabase.from("products").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-      if (deleteError) {
-        setMessage("تعذر مسح بيانات Supabase القديمة: " + deleteError.message);
+      const menuData = await loadMenuData();
+      const extras = normalizeStaticMenu(menuData).filter((product) => product.category === EXTRAS_CATEGORY);
+      const existing = new Set(items.filter((item) => item.category === EXTRAS_CATEGORY).map((item) => normalizeArabic(item.name)));
+      const missing = extras.filter((item) => !existing.has(normalizeArabic(item.name)));
+      if (!missing.length) {
+        notify("الإضافات موجودة بالفعل ولا تحتاج مزامنة.", "success");
         return;
       }
-      const { error } = await supabase.from("products").insert(rows);
-      if (error) {
-        setMessage("تعذر الاستيراد: " + error.message);
-        return;
+      if (configured && session) {
+        const rows = missing.map((product) => toSupabaseProduct(product));
+        const { error } = await supabase.from("products").insert(rows);
+        if (error) {
+          notify("تعذر إضافة الإضافات إلى Supabase: " + error.message, "error");
+          return;
+        }
+        const { data } = await supabase.from("products").select("*").order("sort_order", { ascending: true });
+        persistItems((data || []).map((row, index) => fromSupabaseProduct(row, index)));
+      } else {
+        saveLocal([...items, ...missing]);
       }
-      const { data } = await supabase.from("products").select("*").order("sort_order", { ascending: true });
-      setItems((data || []).map((row, index) => fromSupabaseProduct(row, index)));
-      setMessage(`تم استبدال بيانات Supabase بـ ${rows.length} منتج من ملف Excel النهائي.`);
+      notify(`تم حفظ الإضافات بنجاح: ${missing.length} عنصر.`, "success");
     } catch {
-      setMessage("حدث خطأ أثناء الاستيراد.");
+      notify("حدث خطأ أثناء مزامنة الإضافات.", "error");
     }
   };
 
@@ -1478,19 +1524,23 @@ function AdminPortal({ catalog }) {
           </div>
         )}
         
-        {message && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm font-bold text-amber-700">{message}</p>}
+        {message && (
+          <p className={`mt-3 rounded-lg p-3 text-sm font-bold ${messageKind === "success" ? "bg-emerald-50 text-emerald-700" : messageKind === "error" ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-700"}`}>
+            {message}
+          </p>
+        )}
 
         {configured && session && (
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
-            <p className="font-black text-amber-800">يمكنك استبدال بيانات Supabase بالمنيو النهائي المستخرج من ملف Excel. هذا يمسح المنتجات القديمة ثم يضيف المنتجات النهائية.</p>
-            <button onClick={importStaticMenu} className="mt-3 rounded-lg bg-amber-600 px-4 py-2 font-black text-white">استبدال Supabase بالمنيو النهائي</button>
+            <p className="font-black text-amber-800">يمكنك مزامنة الإضافات من ملف Excel بدون لمس المنتجات التي عدلتها مسبقاً.</p>
+            <button onClick={syncExtras} className="mt-3 rounded-lg bg-amber-600 px-4 py-2 font-black text-white">مزامنة الإضافات فقط</button>
           </div>
         )}
       </section>
 
       {activeTab === "products" ? (
         <>
-          <AdminCreateForm categories={Array.from(new Set(catalog.map(p => p.category).concat(items.map(p => p.category))))} items={items} saveLocal={saveLocal} configured={configured} session={session} setMessage={setMessage} />
+          <AdminCreateForm categories={Array.from(new Set(catalog.map(p => p.category).concat(items.map(p => p.category))))} items={items} saveLocal={saveLocal} configured={configured} session={session} notify={notify} />
           <section className="mt-6">
             {query.trim() && <p className="mb-3 text-sm font-bold text-slate-500">{filtered.length ? `${filtered.length} نتيجة` : "لا توجد نتائج مطابقة للبحث."}</p>}
             <div className="grid gap-3" style={{ minHeight: "200px" }}>
@@ -1501,7 +1551,7 @@ function AdminPortal({ catalog }) {
           </section>
         </>
       ) : (
-        <AdminCategoryManager products={source} configured={configured} session={session} onRenameCategory={renameCategory} onDeleteCategory={deleteCategory} setMessage={setMessage} />
+        <AdminCategoryManager products={source} configured={configured} session={session} onRenameCategory={renameCategory} onDeleteCategory={deleteCategory} notify={notify} />
       )}
     </main>
   );
@@ -1540,7 +1590,7 @@ function toSupabaseProduct(product) {
   };
 }
 
-function AdminCreateForm({ categories, items, saveLocal, configured, session, setMessage }) {
+function AdminCreateForm({ categories, items, saveLocal, configured, session, notify }) {
   const [preview, setPreview] = useState("");
   const [catPreview, setCatPreview] = useState("");
   const [isNewCategory, setIsNewCategory] = useState(false);
@@ -1559,7 +1609,7 @@ function AdminCreateForm({ categories, items, saveLocal, configured, session, se
     const catFile = data.get("categoryImage");
     if (isNewCategory && catFile && catFile.size) {
       if (!isAllowedImageFile(catFile)) {
-        setMessage("صورة التصنيف يجب أن تكون PNG أو JPG أو WEBP أو GIF وأقل من 3MB.");
+        notify("صورة التصنيف يجب أن تكون PNG أو JPG أو WEBP أو GIF وأقل من 3MB.", "error");
         return;
       }
       try {
@@ -1581,7 +1631,7 @@ function AdminCreateForm({ categories, items, saveLocal, configured, session, se
     let image = "b.laben logo.jfif";
     if (file && file.size) {
       if (!isAllowedImageFile(file)) {
-        setMessage("صورة المنتج يجب أن تكون PNG أو JPG أو WEBP أو GIF وأقل من 3MB.");
+        notify("صورة المنتج يجب أن تكون PNG أو JPG أو WEBP أو GIF وأقل من 3MB.", "error");
         return;
       }
       image = await new Promise((resolve, reject) => {
@@ -1607,7 +1657,7 @@ function AdminCreateForm({ categories, items, saveLocal, configured, session, se
     if (configured && session) {
       const { data: inserted, error } = await supabase.from("products").insert(toSupabaseProduct(product)).select().single();
       if (error) {
-        setMessage("تعذر إضافة المنتج إلى Supabase.");
+        notify("تعذر إضافة المنتج إلى Supabase.", "error");
         return;
       }
       saveLocal([...items, fromSupabaseProduct(inserted, items.length)]);
@@ -1733,7 +1783,7 @@ function CategoryDeleteModal({ name, count, categories, onClose, onConfirm }) {
   );
 }
 
-function AdminCategoryManager({ products, configured, session, onRenameCategory, onDeleteCategory, setMessage }) {
+function AdminCategoryManager({ products, configured, session, onRenameCategory, onDeleteCategory, notify }) {
   const [drafts, setDrafts] = useState({});
   const [busy, setBusy] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -1780,7 +1830,7 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
 
   const uploadCatImage = async (name, file) => {
     if (!isAllowedImageFile(file)) {
-      setMessage("صورة التصنيف يجب أن تكون PNG أو JPG أو WEBP أو GIF وأقل من 3MB.");
+      notify("صورة التصنيف يجب أن تكون PNG أو JPG أو WEBP أو GIF وأقل من 3MB.", "error");
       return;
     }
     const dataUrl = await new Promise((resolve, reject) => {
@@ -1796,7 +1846,7 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
     const newName = (drafts[oldName] ?? oldName).trim();
     if (!newName || newName === oldName) return;
     if (categories.includes(newName)) {
-      setMessage(`التصنيف "${newName}" موجود بالفعل. اختر اسماً مختلفاً أو احذف أحد التصنيفين.`);
+      notify(`التصنيف "${newName}" موجود بالفعل. اختر اسماً مختلفاً أو احذف أحد التصنيفين.`, "error");
       return;
     }
     setBusy(oldName);
