@@ -11,7 +11,7 @@ const ADMIN_ROUTE = "/staff-portal-blaben-73.html";
 const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
 const EXTRAS_CATEGORY = "الاضافات";
-const FINAL_CATEGORY_ORDER = ["دنيا الرز", "دنيا القطوطة", "منتجات جديدة", "تريندات دبي", "البمبوظة", "السلانكتيه", "دنيا ام علي", "كشري الحلو", EXTRAS_CATEGORY];
+const FINAL_CATEGORY_ORDER = ["دنيا الرز", "دنيا القشطوطة", "منتجات جديدة", "تريندات دبي", "البمبوظة", "السلانكتيه", "دنيا ام علي", "كشري الحلو", EXTRAS_CATEGORY];
 const MENU_REVISION_KEY = "blabenMenuRevision";
 const MENU_EVENT = "blaben:menu-updated";
 const MENU_CHANNEL_NAME = "blaben-menu";
@@ -248,11 +248,11 @@ function isLikelyProductStart(line, nextLine = "") {
 
 function inferCategory(name) {
   const norm = normalizeArabic(name);
-  if (norm.includes("ارز")) return "دنيا الارز";
+  if (norm.includes("ارز")) return "دنيا الرز";
   if (norm.includes("قشطوط") || norm.includes("قسطوط")) return "دنيا القشطوطة";
-  if (norm.includes("كشري")) return "دينا الكشري";
+  if (norm.includes("كشري")) return "كشري الحلو";
   if (norm.includes("بمبو")) return "البمبوظة";
-  if (norm.includes("طاجن") || norm.includes("ام علي")) return "دنيا ام على";
+  if (norm.includes("طاجن") || norm.includes("ام علي")) return "دنيا ام علي";
   if (norm.includes("دبي") || norm.includes("كريب")) return "تريندات دبي";
   if (norm.includes("اللء")) return "اللؤة";
   if (norm.includes("كيك") || norm.includes("ماتيلدا") || norm.includes("كبسه") || norm.includes("كشخه") || norm.includes("متكندر")) return "دنيا الكيك";
