@@ -424,6 +424,23 @@ function normalizeStaticMenu(data) {
   return [...mainProducts, ...extras];
 }
 
+function dedupeProducts(products) {
+  const seen = new Set();
+  return products.filter((product) => {
+    const key = `${normalizeArabic(product.category)}|${normalizeArabic(product.name)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function mergeCategoryImages(products, categoryImageMap = new Map()) {
+  return products.map((product) => ({
+    ...product,
+    categoryImage: categoryImageMap.get(product.category) || product.categoryImage || "",
+  }));
+}
+
 async function loadMenuData() {
   const res = await fetch("/menu-data.json", { cache: "no-store" });
   if (!res.ok) throw new Error("menu-data missing");
@@ -438,20 +455,24 @@ function useCatalog() {
 
   useEffect(() => {
     let ignore = false;
+    let hydratedFromSupabase = false;
 
     function loadStaticFallback() {
       loadMenuData()
-        .then((data) => !ignore && setCatalog(normalizeStaticMenu(data)))
+        .then((data) => !ignore && !hydratedFromSupabase && setCatalog(dedupeProducts(normalizeStaticMenu(data))))
         .catch(() => {
           fetch("/names_and_descriptons.txt", { cache: "no-store" })
             .then((res) => res.text())
-            .then((text) => !ignore && setCatalog(buildCatalog(parseMenu(text))))
-            .catch(() => !ignore && setCatalog(buildCatalog([])));
+            .then((text) => !ignore && !hydratedFromSupabase && setCatalog(dedupeProducts(buildCatalog(parseMenu(text)))))
+            .catch(() => !ignore && !hydratedFromSupabase && setCatalog(dedupeProducts(buildCatalog([]))));
         });
     }
 
+    // Show the static menu immediately so the public page doesn't wait for
+    // Supabase before rendering.
+    loadStaticFallback();
+
     if (!supabase) {
-      loadStaticFallback();
       return () => {
         ignore = true;
       };
@@ -461,19 +482,24 @@ function useCatalog() {
       const { data, error } = await supabase.from("products").select("*").order("sort_order", { ascending: true });
       if (ignore) return;
       if (error || !data || !data.length) {
-        loadStaticFallback();
         return;
       }
       const products = data.map((row, index) => fromSupabaseProduct(row, index));
       try {
-        const menuData = await loadMenuData();
+        const [{ data: categoryRows }, menuData] = await Promise.all([
+          supabase.from("category_images").select("category,image_url"),
+          loadMenuData(),
+        ]);
+        const categoryImageMap = new Map((categoryRows || []).map((row) => [row.category, row.image_url]));
         const extras = normalizeStaticMenu(menuData).filter((product) => product.category === EXTRAS_CATEGORY);
         const merged = extras.length && !products.some((product) => product.category === EXTRAS_CATEGORY)
           ? [...products, ...extras]
           : products;
-        setCatalog(merged);
+        hydratedFromSupabase = true;
+        setCatalog(dedupeProducts(mergeCategoryImages(merged, categoryImageMap)));
       } catch {
-        setCatalog(products);
+        hydratedFromSupabase = true;
+        setCatalog(dedupeProducts(products));
       }
     }
 
@@ -484,6 +510,7 @@ function useCatalog() {
     const channel = supabase
       .channel("public:products")
       .on("postgres_changes", { event: "*", schema: "public", table: "products" }, loadFromSupabase)
+      .on("postgres_changes", { event: "*", schema: "public", table: "category_images" }, loadFromSupabase)
       .subscribe();
 
     return () => {
@@ -1261,6 +1288,22 @@ function AdminPortal({ catalog }) {
     return safe;
   };
 
+  const upsertCategoryImage = async (category, imageUrl) => {
+    if (!(configured && session && supabase)) return;
+    const { error } = await supabase.from("category_images").upsert({
+      category,
+      image_url: imageUrl,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) throw error;
+  };
+
+  const deleteCategoryImage = async (category) => {
+    if (!(configured && session && supabase)) return;
+    const { error } = await supabase.from("category_images").delete().eq("category", category);
+    if (error) throw error;
+  };
+
   // Verify that a user exists in admin_users table
   const verifyAdmin = async (userId) => {
     if (!supabase) return false;
@@ -1438,8 +1481,17 @@ function AdminPortal({ catalog }) {
     notify("جاري مزامنة الإضافات...", "neutral");
     try {
       const menuData = await loadMenuData();
-      const extras = normalizeStaticMenu(menuData).filter((product) => product.category === EXTRAS_CATEGORY);
+      const extras = dedupeProducts(normalizeStaticMenu(menuData).filter((product) => product.category === EXTRAS_CATEGORY));
       const existing = new Set(items.filter((item) => item.category === EXTRAS_CATEGORY).map((item) => normalizeArabic(item.name)));
+      if (configured && session) {
+        const { data: remoteExtras, error: remoteError } = await supabase
+          .from("products")
+          .select("name")
+          .eq("category", EXTRAS_CATEGORY);
+        if (!remoteError && Array.isArray(remoteExtras)) {
+          remoteExtras.forEach((row) => existing.add(normalizeArabic(row.name)));
+        }
+      }
       const missing = extras.filter((item) => !existing.has(normalizeArabic(item.name)));
       if (!missing.length) {
         notify("الإضافات موجودة بالفعل ولا تحتاج مزامنة.", "success");
@@ -1453,9 +1505,9 @@ function AdminPortal({ catalog }) {
           return;
         }
         const { data } = await supabase.from("products").select("*").order("sort_order", { ascending: true });
-        persistItems((data || []).map((row, index) => fromSupabaseProduct(row, index)));
+        persistItems(dedupeProducts((data || []).map((row, index) => fromSupabaseProduct(row, index))));
       } else {
-        saveLocal([...items, ...missing]);
+        saveLocal(dedupeProducts([...items, ...missing]));
       }
       notify(`تم حفظ الإضافات بنجاح: ${missing.length} عنصر.`, "success");
     } catch {
@@ -1540,7 +1592,7 @@ function AdminPortal({ catalog }) {
 
       {activeTab === "products" ? (
         <>
-          <AdminCreateForm categories={Array.from(new Set(catalog.map(p => p.category).concat(items.map(p => p.category))))} items={items} saveLocal={saveLocal} configured={configured} session={session} notify={notify} />
+          <AdminCreateForm categories={Array.from(new Set(catalog.map(p => p.category).concat(items.map(p => p.category))))} items={items} saveLocal={saveLocal} configured={configured} session={session} notify={notify} upsertCategoryImage={upsertCategoryImage} />
           <section className="mt-6">
             {query.trim() && <p className="mb-3 text-sm font-bold text-slate-500">{filtered.length ? `${filtered.length} نتيجة` : "لا توجد نتائج مطابقة للبحث."}</p>}
             <div className="grid gap-3" style={{ minHeight: "200px" }}>
@@ -1551,7 +1603,7 @@ function AdminPortal({ catalog }) {
           </section>
         </>
       ) : (
-        <AdminCategoryManager products={source} configured={configured} session={session} onRenameCategory={renameCategory} onDeleteCategory={deleteCategory} notify={notify} />
+        <AdminCategoryManager products={source} configured={configured} session={session} onRenameCategory={renameCategory} onDeleteCategory={deleteCategory} notify={notify} upsertCategoryImage={upsertCategoryImage} deleteCategoryImage={deleteCategoryImage} />
       )}
     </main>
   );
@@ -1590,7 +1642,7 @@ function toSupabaseProduct(product) {
   };
 }
 
-function AdminCreateForm({ categories, items, saveLocal, configured, session, notify }) {
+function AdminCreateForm({ categories, items, saveLocal, configured, session, notify, upsertCategoryImage }) {
   const [preview, setPreview] = useState("");
   const [catPreview, setCatPreview] = useState("");
   const [isNewCategory, setIsNewCategory] = useState(false);
@@ -1624,6 +1676,8 @@ function AdminCreateForm({ categories, items, saveLocal, configured, session, no
         localStorage.setItem("blabenCategoryImages", JSON.stringify(stored));
       } catch (e) {
         console.error("Could not save category image", e);
+        notify("تعذر حفظ صورة التصنيف.", "error");
+        return;
       }
     }
 
@@ -1663,6 +1717,15 @@ function AdminCreateForm({ categories, items, saveLocal, configured, session, no
       saveLocal([...items, fromSupabaseProduct(inserted, items.length)]);
     } else {
       saveLocal([...items, { ...product, state: product.state }]);
+    }
+    if (isNewCategory && catFile && catFile.size) {
+      try {
+        await upsertCategoryImage(categoryName, JSON.parse(localStorage.getItem("blabenCategoryImages") || "{}")[categoryName]);
+        notify("تم حفظ صورة التصنيف بنجاح.", "success");
+      } catch (error) {
+        console.error("Could not persist category image", error);
+        notify("تم حفظ المنتج، لكن تعذر مزامنة صورة التصنيف مع الخادم.", "error");
+      }
     }
     
     event.currentTarget.reset();
@@ -1783,7 +1846,7 @@ function CategoryDeleteModal({ name, count, categories, onClose, onConfirm }) {
   );
 }
 
-function AdminCategoryManager({ products, configured, session, onRenameCategory, onDeleteCategory, notify }) {
+function AdminCategoryManager({ products, configured, session, onRenameCategory, onDeleteCategory, notify, upsertCategoryImage, deleteCategoryImage }) {
   const [drafts, setDrafts] = useState({});
   const [busy, setBusy] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -1840,6 +1903,13 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
       reader.readAsDataURL(file);
     });
     saveCatImages({ ...catImages, [name]: dataUrl });
+    try {
+      await upsertCategoryImage(name, dataUrl);
+      notify("تم حفظ صورة التصنيف بنجاح.", "success");
+    } catch (error) {
+      console.error("Could not persist category image", error);
+      notify("تم حفظ صورة التصنيف محلياً فقط. تعذر مزامنتها مع الخادم.", "error");
+    }
   };
 
   const rename = async (oldName) => {
@@ -1855,6 +1925,12 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
       const next = { ...catImages, [newName]: catImages[oldName] };
       delete next[oldName];
       saveCatImages(next);
+      try {
+        await deleteCategoryImage(oldName);
+        await upsertCategoryImage(newName, next[newName]);
+      } catch (error) {
+        console.error("Could not rename category image", error);
+      }
     }
     // Update order as well
     saveCatOrder(catOrder.map((c) => (c === oldName ? newName : c)));
@@ -1872,6 +1948,11 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
       const next = { ...catImages };
       delete next[name];
       saveCatImages(next);
+      try {
+        await deleteCategoryImage(name);
+      } catch (error) {
+        console.error("Could not delete category image", error);
+      }
     }
     saveCatOrder(catOrder.filter((c) => c !== name));
     setBusy("");

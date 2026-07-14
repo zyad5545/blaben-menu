@@ -24,13 +24,34 @@ create table if not exists admin_users (
   created_at timestamptz default now()
 );
 
+create table if not exists category_images (
+  category text primary key,
+  image_url text not null,
+  updated_at timestamptz default now()
+);
+
 alter table admin_users enable row level security;
+alter table category_images enable row level security;
 
 drop policy if exists "admin users can read self" on admin_users;
 create policy "admin users can read self"
   on admin_users for select
   to authenticated
   using (user_id = auth.uid());
+
+drop policy if exists "public read category images" on category_images;
+create policy "public read category images"
+  on category_images for select
+  using (true);
+
+drop policy if exists "admin insert category images" on category_images;
+drop policy if exists "admin update category images" on category_images;
+drop policy if exists "admin delete category images" on category_images;
+create policy "admin write category images"
+  on category_images for all
+  to authenticated
+  using (exists (select 1 from admin_users where user_id = auth.uid()))
+  with check (exists (select 1 from admin_users where user_id = auth.uid()));
 
 alter table products enable row level security;
 
