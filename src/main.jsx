@@ -12,6 +12,9 @@ const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "i
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
 const EXTRAS_CATEGORY = "الاضافات";
 const FINAL_CATEGORY_ORDER = ["دنيا الرز", "دنيا القطوطة", "منتجات جديدة", "تريندات دبي", "البمبوظة", "السلانكتيه", "دنيا ام علي", "كشري الحلو", EXTRAS_CATEGORY];
+const MENU_REVISION_KEY = "blabenMenuRevision";
+const MENU_EVENT = "blaben:menu-updated";
+const MENU_CHANNEL_NAME = "blaben-menu";
 // The "coming soon" state label used in badges across the menu.
 const COMING_SOON_LABEL = "قريبا";
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -151,6 +154,39 @@ function isAllowedImageFile(file) {
   return Boolean(file && ALLOWED_IMAGE_TYPES.has(file.type) && file.size <= MAX_IMAGE_BYTES);
 }
 
+function readImageAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadManagedImage(file, folder) {
+  if (!isAllowedImageFile(file)) throw new Error("invalid-image");
+  if (!supabase) return readImageAsDataUrl(file);
+
+  const extension = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+  const fileName = `${folder}/${crypto.randomUUID()}.${extension}`;
+  const { error } = await supabase.storage
+    .from("product-images")
+    .upload(fileName, file, { cacheControl: "31536000", contentType: file.type, upsert: false });
+  if (error) throw error;
+  return supabase.storage.from("product-images").getPublicUrl(fileName).data.publicUrl;
+}
+
+function publishMenuChange() {
+  const revision = String(Date.now());
+  localStorage.setItem(MENU_REVISION_KEY, revision);
+  window.dispatchEvent(new CustomEvent(MENU_EVENT, { detail: revision }));
+  if ("BroadcastChannel" in window) {
+    const channel = new BroadcastChannel(MENU_CHANNEL_NAME);
+    channel.postMessage(revision);
+    channel.close();
+  }
+}
+
 function isSafeImageSrc(src) {
   const value = String(src || "");
   if (value.startsWith("data:image/")) return /^data:image\/(png|jpeg|jpg|webp|gif);base64,[a-z0-9+/=]+$/i.test(value);
@@ -215,7 +251,7 @@ function inferCategory(name) {
   if (norm.includes("ارز")) return "دنيا الارز";
   if (norm.includes("قشطوط") || norm.includes("قسطوط")) return "دنيا القشطوطة";
   if (norm.includes("كشري")) return "دينا الكشري";
-  if (norm.includes("بمبو")) return "دنيا البمبوظة";
+  if (norm.includes("بمبو")) return "البمبوظة";
   if (norm.includes("طاجن") || norm.includes("ام علي")) return "دنيا ام على";
   if (norm.includes("دبي") || norm.includes("كريب")) return "تريندات دبي";
   if (norm.includes("اللء")) return "اللؤة";
@@ -370,13 +406,26 @@ function groupProducts(products) {
 
   const priority = FINAL_CATEGORY_ORDER;
 
-  let customCatImages = {};
+  let customCatOrder = [];
   try {
-    customCatImages = JSON.parse(localStorage.getItem("blabenCategoryImages") || "{}");
+    customCatOrder = JSON.parse(localStorage.getItem("blabenCategoryOrder") || "[]");
   } catch {}
 
   return [...map.entries()]
-    .sort(([a], [b]) => {
+    .sort(([a, aItems], [b, bItems]) => {
+      const aSort = aItems.find((p) => p.categorySort != null)?.categorySort;
+      const bSort = bItems.find((p) => p.categorySort != null)?.categorySort;
+
+      const aiCustom = customCatOrder.indexOf(a);
+      const biCustom = customCatOrder.indexOf(b);
+
+      const aFinalSort = aSort != null ? aSort : (aiCustom !== -1 ? aiCustom : undefined);
+      const bFinalSort = bSort != null ? bSort : (biCustom !== -1 ? biCustom : undefined);
+
+      if (aFinalSort !== undefined && bFinalSort !== undefined) return aFinalSort - bFinalSort;
+      if (aFinalSort !== undefined) return -1;
+      if (bFinalSort !== undefined) return 1;
+
       const ai = priority.indexOf(a);
       const bi = priority.indexOf(b);
       if (ai !== -1 && bi !== -1) return ai - bi;
@@ -384,11 +433,22 @@ function groupProducts(products) {
       if (bi !== -1) return 1;
       return 0;
     })
-    .map(([name, items]) => ({
-      name,
-      items: [...items].sort((a, b) => (a.sort ?? a.sort_order ?? a.id ?? 0) - (b.sort ?? b.sort_order ?? b.id ?? 0)),
-      image: customCatImages[name] || items.find((item) => item.categoryImage)?.categoryImage || items[0]?.image,
-    }));
+    .map(([name, items]) => {
+      // Sort items first so the fallback image is always deterministic
+      // (same product every time, regardless of Supabase fetch order).
+      const sorted = [...items].sort((a, b) => {
+        const av = a.sort ?? a.sort_order ?? 0;
+        const bv = b.sort ?? b.sort_order ?? 0;
+        if (av !== bv) return av - bv;
+        // Stable tie-breaker: alphabetical by name, then by UUID
+        return (a.name || "").localeCompare(b.name || "") || String(a.uuid || "").localeCompare(String(b.uuid || ""));
+      });
+      // Category image priority:
+      // 1. Explicit category image from category_images table (via mergeCategoryImages)
+      // 2. Deterministic fallback: first product image by sort order
+      const catImage = sorted.find((p) => p.categoryImage)?.categoryImage || sorted[0]?.image;
+      return { name, items: sorted, image: catImage };
+    });
 }
 
 function normalizeStaticMenu(data) {
@@ -434,17 +494,23 @@ function dedupeProducts(products) {
   });
 }
 
-function mergeCategoryImages(products, categoryImageMap = new Map()) {
+function mergeCategoryImages(products, categoryImageMap = new Map(), categorySortMap = new Map()) {
   return products.map((product) => ({
     ...product,
     categoryImage: categoryImageMap.get(product.category) || product.categoryImage || "",
+    categorySort: categorySortMap.get(product.category),
   }));
 }
 
+let _menuDataCache = null;
+
 async function loadMenuData() {
+  if (_menuDataCache) return _menuDataCache;
   const res = await fetch("/menu-data.json", { cache: "no-store" });
   if (!res.ok) throw new Error("menu-data missing");
-  return res.json();
+  const data = await res.json();
+  _menuDataCache = data;
+  return data;
 }
 
 // Source of truth for the PUBLIC menu. The Excel-generated JSON is the safe
@@ -455,52 +521,51 @@ function useCatalog() {
 
   useEffect(() => {
     let ignore = false;
-    let hydratedFromSupabase = false;
 
     function loadStaticFallback() {
       loadMenuData()
-        .then((data) => !ignore && !hydratedFromSupabase && setCatalog(dedupeProducts(normalizeStaticMenu(data))))
+        .then((data) => !ignore && setCatalog(dedupeProducts(normalizeStaticMenu(data))))
         .catch(() => {
           fetch("/names_and_descriptons.txt", { cache: "no-store" })
             .then((res) => res.text())
-            .then((text) => !ignore && !hydratedFromSupabase && setCatalog(dedupeProducts(buildCatalog(parseMenu(text)))))
-            .catch(() => !ignore && !hydratedFromSupabase && setCatalog(dedupeProducts(buildCatalog([]))));
+            .then((text) => !ignore && setCatalog(dedupeProducts(buildCatalog(parseMenu(text)))))
+            .catch(() => !ignore && setCatalog(dedupeProducts(buildCatalog([]))));
         });
     }
 
-    // Show the static menu immediately so the public page doesn't wait for
-    // Supabase before rendering.
-    loadStaticFallback();
-
     if (!supabase) {
+      loadStaticFallback();
       return () => {
         ignore = true;
       };
     }
 
     async function loadFromSupabase() {
-      const { data, error } = await supabase.from("products").select("*").order("sort_order", { ascending: true });
+      const [productsResponse, categoryResponse, menuData] = await Promise.all([
+        supabase.from("products").select("*").order("sort_order", { ascending: true }),
+        supabase.from("category_images").select("category,image_url,sort_order"),
+        loadMenuData().catch(() => null),
+      ]);
       if (ignore) return;
-      if (error || !data || !data.length) {
+      if (productsResponse.error || !productsResponse.data || !productsResponse.data.length) {
+        loadStaticFallback();
         return;
       }
-      const products = data.map((row, index) => fromSupabaseProduct(row, index));
-      try {
-        const [{ data: categoryRows }, menuData] = await Promise.all([
-          supabase.from("category_images").select("category,image_url"),
-          loadMenuData(),
-        ]);
-        const categoryImageMap = new Map((categoryRows || []).map((row) => [row.category, row.image_url]));
-        const extras = normalizeStaticMenu(menuData).filter((product) => product.category === EXTRAS_CATEGORY);
-        const merged = extras.length && !products.some((product) => product.category === EXTRAS_CATEGORY)
-          ? [...products, ...extras]
-          : products;
-        hydratedFromSupabase = true;
-        setCatalog(dedupeProducts(mergeCategoryImages(merged, categoryImageMap)));
-      } catch {
-        hydratedFromSupabase = true;
-        setCatalog(dedupeProducts(products));
-      }
+      const products = productsResponse.data.map((row, index) => fromSupabaseProduct(row, index));
+      const staticProducts = menuData ? normalizeStaticMenu(menuData) : [];
+      const defaultCategoryImages = new Map(
+        staticProducts
+          .filter((product) => product.categoryImage)
+          .map((product) => [product.category, product.categoryImage])
+      );
+      const savedCategoryImages = categoryResponse.error
+        ? new Map()
+        : new Map((categoryResponse.data || []).map((row) => [row.category, row.image_url]));
+      const categoryImageMap = new Map([...defaultCategoryImages, ...savedCategoryImages]);
+      const categorySortMap = categoryResponse.error
+        ? new Map()
+        : new Map((categoryResponse.data || []).filter(row => row.sort_order != null).map((row) => [row.category, row.sort_order]));
+      setCatalog(dedupeProducts(mergeCategoryImages(products, categoryImageMap, categorySortMap)));
     }
 
     loadFromSupabase();
@@ -512,10 +577,20 @@ function useCatalog() {
       .on("postgres_changes", { event: "*", schema: "public", table: "products" }, loadFromSupabase)
       .on("postgres_changes", { event: "*", schema: "public", table: "category_images" }, loadFromSupabase)
       .subscribe();
+    const crossTabChannel = "BroadcastChannel" in window ? new BroadcastChannel(MENU_CHANNEL_NAME) : null;
+    const onRevision = () => loadFromSupabase();
+    const onStorage = (event) => event.key === MENU_REVISION_KEY && loadFromSupabase();
+    crossTabChannel?.addEventListener("message", onRevision);
+    window.addEventListener(MENU_EVENT, onRevision);
+    window.addEventListener("storage", onStorage);
 
     return () => {
       ignore = true;
       supabase.removeChannel(channel);
+      crossTabChannel?.removeEventListener("message", onRevision);
+      crossTabChannel?.close();
+      window.removeEventListener(MENU_EVENT, onRevision);
+      window.removeEventListener("storage", onStorage);
     };
   }, []);
 
@@ -583,37 +658,44 @@ function PublicHeader({ query, onQuery, results, onOpen }) {
               className="min-w-0 flex-1 bg-transparent text-sm font-bold text-blaben-950 outline-none placeholder:text-slate-400 md:text-base"
             />
             {query && (
-              <button type="button" onClick={() => onQuery("")} className="rounded-full bg-white px-3 py-1 text-xs font-black text-blaben-850">
+              <button type="button" onClick={() => { onQuery(""); setOpen(false); document.getElementById("menu-search")?.blur(); }} className="rounded-full bg-white px-3 py-1 text-xs font-black text-blaben-850">
                 مسح
               </button>
             )}
           </div>
           {open && hasQuery && (
-            <div className="absolute inset-x-0 top-[calc(100%+8px)] z-50 max-h-[70vh] overflow-y-auto rounded-lg border border-blue-100 bg-white p-2 shadow-luxe">
-              {results.length ? (
-                <div className="grid gap-2">
-                  {results.slice(0, 12).map((product) => (
-                    <button
-                      key={`search-${product.id}`}
-                      type="button"
-                      onClick={() => {
-                        onOpen(product);
-                        setOpen(false);
-                      }}
-                      className="grid grid-cols-[64px_1fr] items-center gap-3 rounded-lg p-2 text-right transition hover:bg-blaben-50"
-                    >
-                      <img loading="lazy" decoding="async" src={asset(product.image)} alt="" className="h-16 w-16 rounded-lg object-cover" />
-                      <span>
-                        <strong className="block leading-6 text-blaben-950">{product.name}</strong>
-                        <small className="block text-slate-500">{product.category} · {priceSummary(product)}</small>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="p-4 text-center text-sm font-bold text-slate-500">لا توجد نتائج مطابقة</p>
-              )}
-            </div>
+            <>
+              {/* Transparent backdrop: closes search when tapping outside, prevents click-through to page elements */}
+              <div className="fixed inset-0 z-40" onClick={() => { onQuery(""); setOpen(false); document.getElementById("menu-search")?.blur(); }} />
+              <div className="absolute inset-x-0 top-[calc(100%+8px)] z-50 max-h-[min(70vh,70dvh)] overflow-y-auto rounded-lg border border-blue-100 bg-white p-2 shadow-luxe" style={{ overscrollBehavior: "contain" }}>
+                {results.length ? (
+                  <div className="grid gap-2">
+                    {results.slice(0, 12).map((product) => (
+                      <button
+                        key={`search-${product.id}`}
+                        type="button"
+                        onClick={() => {
+                          const target = product;
+                          onQuery("");
+                          setOpen(false);
+                          document.getElementById("menu-search")?.blur();
+                          onOpen(target);
+                        }}
+                        className="grid grid-cols-[64px_1fr] items-center gap-3 rounded-lg p-2 text-right transition hover:bg-blaben-50"
+                      >
+                        <img loading="lazy" decoding="async" src={asset(product.image)} alt="" className="h-16 w-16 rounded-lg object-cover" />
+                        <span>
+                          <strong className="block leading-6 text-blaben-950">{product.name}</strong>
+                          <small className="block text-slate-500">{product.category} · {priceSummary(product)}</small>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="p-4 text-center text-sm font-bold text-slate-500">لا توجد نتائج مطابقة</p>
+                )}
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -1288,20 +1370,26 @@ function AdminPortal({ catalog }) {
     return safe;
   };
 
+  const uploadImage = (file, folder) => uploadManagedImage(file, folder);
+
   const upsertCategoryImage = async (category, imageUrl) => {
-    if (!(configured && session && supabase)) return;
+    if (!(configured && session && supabase)) {
+      throw new Error("not-authenticated");
+    }
     const { error } = await supabase.from("category_images").upsert({
       category,
       image_url: imageUrl,
       updated_at: new Date().toISOString(),
     });
     if (error) throw error;
+    publishMenuChange();
   };
 
   const deleteCategoryImage = async (category) => {
     if (!(configured && session && supabase)) return;
     const { error } = await supabase.from("category_images").delete().eq("category", category);
     if (error) throw error;
+    publishMenuChange();
   };
 
   // Verify that a user exists in admin_users table
@@ -1355,20 +1443,17 @@ function AdminPortal({ catalog }) {
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  useEffect(() => {
+  const refreshProducts = async () => {
     if (!supabase || !session) return;
-    supabase
-      .from("products")
-      .select("*")
-      .order("sort_order", { ascending: true })
-      .then(({ data, error }) => {
-        if (error) {
-          notify("تعذر تحميل بيانات Supabase. راجع إعدادات الجدول والسياسات.", "error");
-          return;
-        }
-        setItems((data || []).map(fromSupabaseProduct));
-      });
-  }, [session]);
+    const { data, error } = await supabase.from("products").select("*").order("sort_order", { ascending: true });
+    if (error) {
+      notify("تعذر تحميل بيانات Supabase. راجع إعدادات الجدول والسياسات.", "error");
+      return;
+    }
+    setItems((data || []).map(fromSupabaseProduct));
+  };
+
+  useEffect(() => { refreshProducts(); }, [session]);
 
   const login = async (event) => {
     event.preventDefault();
@@ -1403,31 +1488,42 @@ function AdminPortal({ catalog }) {
 
   const saveLocal = (next) => {
     persistItems(next);
+    publishMenuChange();
     notify("تم الحفظ بنجاح.", "success");
   };
 
   const removeProduct = async (product) => {
+    const previous = items;
+    const next = items.filter((item) => item.id !== product.id && item.uuid !== product.uuid);
+    persistItems(next);
     if (configured && session && product.uuid) {
       const { error } = await supabase.from("products").delete().eq("id", product.uuid);
       if (error) {
+        persistItems(previous);
         notify("تعذر حذف المنتج من Supabase.", "error");
         return;
       }
+      await refreshProducts();
     }
-    persistItems(items.filter((item) => item.id !== product.id && item.uuid !== product.uuid));
+    publishMenuChange();
     notify("تم حذف المنتج بنجاح.", "success");
   };
 
   const updateProduct = async (product, patch) => {
     const nextProduct = { ...product, ...patch };
+    const previous = items;
+    const next = items.map((item) => (item.id === product.id || item.uuid === product.uuid ? nextProduct : item));
+    persistItems(next);
     if (configured && session && product.uuid) {
       const { error } = await supabase.from("products").update(toSupabaseProduct(nextProduct)).eq("id", product.uuid);
       if (error) {
+        persistItems(previous);
         notify("تعذر حفظ التعديل في Supabase.", "error");
         return;
       }
+      await refreshProducts();
     }
-    persistItems(items.map((item) => (item.id === product.id || item.uuid === product.uuid ? nextProduct : item)));
+    publishMenuChange();
     notify("تم حفظ التعديل بنجاح.", "success");
   };
 
@@ -1592,18 +1688,18 @@ function AdminPortal({ catalog }) {
 
       {activeTab === "products" ? (
         <>
-          <AdminCreateForm categories={Array.from(new Set(catalog.map(p => p.category).concat(items.map(p => p.category))))} items={items} saveLocal={saveLocal} configured={configured} session={session} notify={notify} upsertCategoryImage={upsertCategoryImage} />
+          <AdminCreateForm categories={Array.from(new Set(catalog.map(p => p.category).concat(items.map(p => p.category))))} items={items} saveLocal={saveLocal} configured={configured} session={session} notify={notify} upsertCategoryImage={upsertCategoryImage} uploadImage={uploadImage} />
           <section className="mt-6">
             {query.trim() && <p className="mb-3 text-sm font-bold text-slate-500">{filtered.length ? `${filtered.length} نتيجة` : "لا توجد نتائج مطابقة للبحث."}</p>}
             <div className="grid gap-3" style={{ minHeight: "200px" }}>
               {filtered.map((product) => (
-                <AdminProductRow key={`${product.uuid || product.id}-${product.name}`} product={product} onUpdate={updateProduct} onDelete={removeProduct} />
+                <AdminProductRow key={`${product.uuid || product.id}-${product.name}`} product={product} onUpdate={updateProduct} onDelete={removeProduct} uploadImage={uploadImage} notify={notify} />
               ))}
             </div>
           </section>
         </>
       ) : (
-        <AdminCategoryManager products={source} configured={configured} session={session} onRenameCategory={renameCategory} onDeleteCategory={deleteCategory} notify={notify} upsertCategoryImage={upsertCategoryImage} deleteCategoryImage={deleteCategoryImage} />
+        <AdminCategoryManager products={source} configured={configured} session={session} onRenameCategory={renameCategory} onDeleteCategory={deleteCategory} notify={notify} upsertCategoryImage={upsertCategoryImage} deleteCategoryImage={deleteCategoryImage} uploadImage={uploadImage} />
       )}
     </main>
   );
@@ -1642,7 +1738,7 @@ function toSupabaseProduct(product) {
   };
 }
 
-function AdminCreateForm({ categories, items, saveLocal, configured, session, notify, upsertCategoryImage }) {
+function AdminCreateForm({ categories, items, saveLocal, configured, session, notify, upsertCategoryImage, uploadImage }) {
   const [preview, setPreview] = useState("");
   const [catPreview, setCatPreview] = useState("");
   const [isNewCategory, setIsNewCategory] = useState(false);
@@ -1659,24 +1755,20 @@ function AdminCreateForm({ categories, items, saveLocal, configured, session, no
     const categoryName = category.trim();
 
     const catFile = data.get("categoryImage");
+    let categoryImage = "";
     if (isNewCategory && catFile && catFile.size) {
       if (!isAllowedImageFile(catFile)) {
         notify("صورة التصنيف يجب أن تكون PNG أو JPG أو WEBP أو GIF وأقل من 3MB.", "error");
         return;
       }
       try {
-        const catImgBase64 = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.onerror = reject;
-          reader.readAsDataURL(catFile);
-        });
+        categoryImage = await uploadImage(catFile, "categories");
         const stored = JSON.parse(localStorage.getItem("blabenCategoryImages") || "{}");
-        stored[categoryName] = catImgBase64;
+        stored[categoryName] = categoryImage;
         localStorage.setItem("blabenCategoryImages", JSON.stringify(stored));
       } catch (e) {
         console.error("Could not save category image", e);
-        notify("تعذر حفظ صورة التصنيف.", "error");
+        notify("تعذر رفع صورة التصنيف. تحقق من إعدادات Supabase Storage.", "error");
         return;
       }
     }
@@ -1688,12 +1780,13 @@ function AdminCreateForm({ categories, items, saveLocal, configured, session, no
         notify("صورة المنتج يجب أن تكون PNG أو JPG أو WEBP أو GIF وأقل من 3MB.", "error");
         return;
       }
-      image = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
+      try {
+        image = await uploadImage(file, "products");
+      } catch (error) {
+        console.error("Could not upload product image", error);
+        notify("تعذر رفع صورة المنتج. تحقق من إعدادات Supabase Storage.", "error");
+        return;
+      }
     }
     const product = {
       id: Date.now(),
@@ -1703,6 +1796,7 @@ function AdminCreateForm({ categories, items, saveLocal, configured, session, no
       description: limitText(data.get("description"), 500),
       state: data.get("state"),
       image,
+      sort_order: (items.reduce((max, p) => Math.max(max, p.sort_order ?? p.sort ?? 0), 0) + 10),
       variants: variants.map((variant) => ({
         label: limitText(variant.label, 40),
         price: limitText(variant.price, 40),
@@ -1720,7 +1814,7 @@ function AdminCreateForm({ categories, items, saveLocal, configured, session, no
     }
     if (isNewCategory && catFile && catFile.size) {
       try {
-        await upsertCategoryImage(categoryName, JSON.parse(localStorage.getItem("blabenCategoryImages") || "{}")[categoryName]);
+        await upsertCategoryImage(categoryName, categoryImage);
         notify("تم حفظ صورة التصنيف بنجاح.", "success");
       } catch (error) {
         console.error("Could not persist category image", error);
@@ -1846,7 +1940,7 @@ function CategoryDeleteModal({ name, count, categories, onClose, onConfirm }) {
   );
 }
 
-function AdminCategoryManager({ products, configured, session, onRenameCategory, onDeleteCategory, notify, upsertCategoryImage, deleteCategoryImage }) {
+function AdminCategoryManager({ products, configured, session, onRenameCategory, onDeleteCategory, notify, upsertCategoryImage, deleteCategoryImage, uploadImage }) {
   const [drafts, setDrafts] = useState({});
   const [busy, setBusy] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -1881,9 +1975,25 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
     return ordered;
   }, [counts, catOrder]);
 
-  const saveCatOrder = (next) => {
+  const saveCatOrder = async (next) => {
     localStorage.setItem("blabenCategoryOrder", JSON.stringify(next));
     setCatOrder(next);
+    if (configured && session && supabase) {
+      try {
+        const { data: existing } = await supabase.from("category_images").select("category, image_url");
+        const existingMap = new Map((existing || []).map(r => [r.category, r.image_url]));
+        const updates = next.map((cat, idx) => ({
+          category: cat,
+          sort_order: idx,
+          ...(existingMap.has(cat) && existingMap.get(cat) != null ? { image_url: existingMap.get(cat) } : {})
+        }));
+        const { error } = await supabase.from("category_images").upsert(updates);
+        if (error) console.error("Failed to save category order to Supabase", error);
+        else publishMenuChange();
+      } catch (err) {
+        console.error("Failed to save category order", err);
+      }
+    }
   };
 
   const saveCatImages = (next) => {
@@ -1896,19 +2006,14 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
       notify("صورة التصنيف يجب أن تكون PNG أو JPG أو WEBP أو GIF وأقل من 3MB.", "error");
       return;
     }
-    const dataUrl = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-    saveCatImages({ ...catImages, [name]: dataUrl });
     try {
-      await upsertCategoryImage(name, dataUrl);
+      const imageUrl = await uploadImage(file, "categories");
+      saveCatImages({ ...catImages, [name]: imageUrl });
+      await upsertCategoryImage(name, imageUrl);
       notify("تم حفظ صورة التصنيف بنجاح.", "success");
     } catch (error) {
       console.error("Could not persist category image", error);
-      notify("تم حفظ صورة التصنيف محلياً فقط. تعذر مزامنتها مع الخادم.", "error");
+      notify("تعذر رفع صورة التصنيف. تحقق من إعدادات Supabase Storage.", "error");
     }
   };
 
@@ -2037,7 +2142,7 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
                 <span className="text-xs text-slate-500 sm:text-sm">{counts.get(name)} منتج</span>
                 <label className="cursor-pointer rounded-lg bg-blaben-50 px-2 py-1 text-xs font-black text-blaben-850 sm:px-3 sm:py-1.5 sm:text-sm">
                   تغيير الصورة
-                  <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={(event) => event.target.files?.[0] && uploadCatImage(name, event.target.files[0])} />
+                  <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadCatImage(name, file); event.target.value = ""; }} />
                 </label>
                 <div className="flex gap-2 mr-auto">
                   <button disabled={busy === name} onClick={() => rename(name)} className="rounded-lg bg-blaben-850 px-3 py-1.5 text-xs font-black text-white disabled:opacity-50 sm:px-4 sm:py-2 sm:text-sm">حفظ</button>
@@ -2090,18 +2195,26 @@ function VariantEditor({ variants, onChange }) {
   );
 }
 
-function AdminProductRow({ product, onUpdate, onDelete }) {
+function AdminProductRow({ product, onUpdate, onDelete, uploadImage, notify }) {
   const [draft, setDraft] = useState(product);
+  const [uploading, setUploading] = useState(false);
   useEffect(() => setDraft(product), [product]);
   const updateImage = async (file) => {
-    if (!file || !isAllowedImageFile(file)) return;
-    const dataUrl = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-    setDraft({ ...draft, image: dataUrl });
+    if (!file || !isAllowedImageFile(file)) {
+      notify("صورة المنتج يجب أن تكون PNG أو JPG أو WEBP أو GIF وأقل من 3MB.", "error");
+      return;
+    }
+    setUploading(true);
+    try {
+      const imageUrl = await uploadImage(file, "products");
+      setDraft((current) => ({ ...current, image: imageUrl }));
+      notify("تم رفع الصورة. اضغط حفظ لتطبيقها على المنتج.", "success");
+    } catch (error) {
+      console.error("Could not upload product image", error);
+      notify("تعذر رفع صورة المنتج. تحقق من إعدادات Supabase Storage.", "error");
+    } finally {
+      setUploading(false);
+    }
   };
   return (
     <article className="grid gap-3 rounded-lg border border-blue-100 bg-white p-3 shadow-sm">
@@ -2110,8 +2223,8 @@ function AdminProductRow({ product, onUpdate, onDelete }) {
         <div className="grid shrink-0 gap-2">
           <img loading="lazy" decoding="async" src={asset(draft.image)} alt="" className="h-16 w-16 rounded-lg object-cover sm:h-24 sm:w-24" />
           <label className="cursor-pointer rounded-lg bg-blaben-50 px-2 py-1 text-center text-xs font-black text-blaben-850">
-            تغيير
-            <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={(event) => updateImage(event.target.files?.[0])} />
+            {uploading ? "جاري الرفع..." : "تغيير"}
+            <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" disabled={uploading} onChange={(event) => { updateImage(event.target.files?.[0]); event.target.value = ""; }} />
           </label>
         </div>
         {/* Fields */}

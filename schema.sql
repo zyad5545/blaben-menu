@@ -26,12 +26,15 @@ create table if not exists admin_users (
 
 create table if not exists category_images (
   category text primary key,
-  image_url text not null,
+  image_url text,
+  sort_order integer default 0,
   updated_at timestamptz default now()
 );
 
 alter table admin_users enable row level security;
 alter table category_images enable row level security;
+alter table category_images alter column image_url drop not null;
+alter table category_images add column if not exists sort_order integer default 0;
 
 drop policy if exists "admin users can read self" on admin_users;
 create policy "admin users can read self"
@@ -52,6 +55,19 @@ create policy "admin write category images"
   to authenticated
   using (exists (select 1 from admin_users where user_id = auth.uid()))
   with check (exists (select 1 from admin_users where user_id = auth.uid()));
+
+-- Push product and category-cover changes to open menu pages immediately.
+do $$
+begin
+  alter publication supabase_realtime add table products;
+exception when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table category_images;
+exception when duplicate_object then null;
+end $$;
 
 alter table products enable row level security;
 
