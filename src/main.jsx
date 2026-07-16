@@ -163,15 +163,53 @@ function readImageAsDataUrl(file) {
   });
 }
 
+// No product/category image is ever displayed larger than roughly 900px wide
+// anywhere in the app (the biggest is the modal hero image). Phone camera
+// photos are routinely 3000-4000px and several MB — every visitor to the
+// site would otherwise download that full file just to show a thumbnail.
+// This resizes + re-compresses on upload, once, so every future page load
+// is fast. GIFs are left untouched so animations aren't destroyed.
+const MAX_IMAGE_DIMENSION = 1600;
+const IMAGE_JPEG_QUALITY = 0.82;
+
+async function resizeImageFile(file) {
+  if (file.type === "image/gif") return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(bitmap.width, bitmap.height));
+    if (scale === 1 && file.size <= 400 * 1024) {
+      // Already small enough — skip re-encoding to avoid unnecessary quality loss.
+      bitmap.close?.();
+      return file;
+    }
+    const width = Math.round(bitmap.width * scale);
+    const height = Math.round(bitmap.height * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close?.();
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", IMAGE_JPEG_QUALITY));
+    if (!blob) return file;
+    const resizedName = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+    return new File([blob], resizedName, { type: "image/jpeg" });
+  } catch (error) {
+    console.error("Image resize failed, uploading original", error);
+    return file; // Never block an upload just because client-side resize failed.
+  }
+}
+
 async function uploadManagedImage(file, folder) {
   if (!isAllowedImageFile(file)) throw new Error("invalid-image");
-  if (!supabase) return readImageAsDataUrl(file);
+  const optimized = await resizeImageFile(file);
+  if (!supabase) return readImageAsDataUrl(optimized);
 
-  const extension = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+  const extension = (optimized.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
   const fileName = `${folder}/${crypto.randomUUID()}.${extension}`;
   const { error } = await supabase.storage
     .from("product-images")
-    .upload(fileName, file, { cacheControl: "31536000", contentType: file.type, upsert: false });
+    .upload(fileName, optimized, { cacheControl: "31536000", contentType: optimized.type, upsert: false });
   if (error) throw error;
   return supabase.storage.from("product-images").getPublicUrl(fileName).data.publicUrl;
 }
@@ -190,7 +228,16 @@ function publishMenuChange() {
 function isSafeImageSrc(src) {
   const value = String(src || "");
   if (value.startsWith("data:image/")) return /^data:image\/(png|jpeg|jpg|webp|gif);base64,[a-z0-9+/=]+$/i.test(value);
-  if (value.startsWith("https://")) return true;
+  if (value.startsWith("https://")) {
+    // Only allow images actually hosted in our own Supabase storage bucket,
+    // not any arbitrary external https URL.
+    if (!supabaseUrl) return false;
+    try {
+      return new URL(value).host === new URL(supabaseUrl).host;
+    } catch {
+      return false;
+    }
+  }
   return /^[^\\/:*?"<>|]+?\.(?:png|jpe?g|jfif|webp|gif)$/i.test(value);
 }
 
@@ -556,7 +603,7 @@ function useCatalog() {
 
     async function loadFromSupabase() {
       const [productsResponse, categoryResponse, menuData] = await Promise.all([
-        supabase.from("products").select("*").order("sort_order", { ascending: true }),
+        supabase.from("products").select("*").order("sort_order", { ascending: true }).order("id", { ascending: true }),
         supabase.from("category_images").select("category,image_url,sort_order"),
         loadMenuData().catch(() => null),
       ]);
@@ -697,11 +744,10 @@ function PublicHeader({ query, onQuery, results, onOpen }) {
                         key={`search-${product.id}`}
                         type="button"
                         onClick={() => {
-                          const target = product;
+                          onOpen(product);
                           onQuery("");
                           setOpen(false);
                           document.getElementById("menu-search")?.blur();
-                          onOpen(target);
                         }}
                         className="grid grid-cols-[64px_1fr] items-center gap-3 rounded-lg p-2 text-right transition hover:bg-blaben-50"
                       >
@@ -751,6 +797,31 @@ function ProductCard({ product, onOpen, compact = false }) {
 }
 
 function ProductModal({ product, onClose }) {
+  // Lock body scroll while the modal is open. This does two things:
+  // 1. Stops the background page from scrolling behind the modal.
+  // 2. Fixes a real mobile bug: this modal is `position: fixed`, and if it's
+  //    inserted into the DOM at the exact moment the on-screen keyboard is
+  //    still animating closed (e.g. right after tapping a search result),
+  //    mobile browsers can mis-layout it relative to a stale viewport,
+  //    leaving it visibly off-center until something forces a reflow.
+  //    Pinning <body> to a fixed, known scroll position removes that
+  //    ambiguity so the modal reliably centers in the current viewport.
+  useEffect(() => {
+    if (!product) return;
+    const scrollY = window.scrollY;
+    const { style } = document.body;
+    const previous = { position: style.position, top: style.top, width: style.width };
+    style.position = "fixed";
+    style.top = `-${scrollY}px`;
+    style.width = "100%";
+    return () => {
+      style.position = previous.position;
+      style.top = previous.top;
+      style.width = previous.width;
+      window.scrollTo(0, scrollY);
+    };
+  }, [product]);
+
   if (!product) return null;
   const pricing = priceDetails(product);
   return (
@@ -1359,12 +1430,18 @@ function AdminPortal({ catalog }) {
   const [message, setMessage] = useState("");
   const [messageKind, setMessageKind] = useState("neutral");
   const [query, setQuery] = useState("");
+  const [visibleCount, setVisibleCount] = useState(30);
   const [activeTab, setActiveTab] = useState("products");
   const [connectionError, setConnectionError] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const configured = Boolean(supabase);
   const source = configured ? items : items.length ? items : catalog;
   const filtered = query.trim() ? source.filter((product) => productMatches(product, query)) : source;
+  // Only mount rows the admin can currently see — rendering every product at
+  // once (each with its own local edit state) gets noticeably slow as the
+  // catalog grows. Reset to the first page whenever the search changes.
+  useEffect(() => { setVisibleCount(30); }, [query]);
+  const visibleProducts = filtered.slice(0, visibleCount);
 
   const notify = (text, kind = "neutral") => {
     setMessage(text);
@@ -1438,7 +1515,6 @@ function AdminPortal({ catalog }) {
       .select("user_id")
       .eq("user_id", userId)
       .maybeSingle();
-    console.log("Admin check:", { userId, admin, error });
     return Boolean(admin);
   };
 
@@ -1453,7 +1529,6 @@ function AdminPortal({ catalog }) {
         notify("تعذر الاتصال بـ Supabase.", "error");
         return;
       }
-        console.log("Restored session:", data.session);
         if (data.session) {
           // Verify admin status on session restore
           const isAdmin = await verifyAdmin(data.session.user.id);
@@ -1483,7 +1558,7 @@ function AdminPortal({ catalog }) {
 
   const refreshProducts = async () => {
     if (!supabase || !session) return;
-    const { data, error } = await supabase.from("products").select("*").order("sort_order", { ascending: true });
+    const { data, error } = await supabase.from("products").select("*").order("sort_order", { ascending: true }).order("id", { ascending: true });
     if (error) {
       notify("تعذر تحميل بيانات Supabase. راجع إعدادات الجدول والسياسات.", "error");
       return;
@@ -1501,7 +1576,6 @@ function AdminPortal({ catalog }) {
     setIsLoggingIn(true);
     try {
       const { data: authData, error } = await supabase.auth.signInWithPassword({ email, password });
-      console.log("Login result:", { session: authData?.session, error });
       if (error) {
         console.error("Login error:", error);
         notify(mapSupabaseError(error.message), "error");
@@ -1509,7 +1583,6 @@ function AdminPortal({ catalog }) {
       }
       // Verify admin authorization
       const isAdmin = await verifyAdmin(authData.session.user.id);
-      console.log("Admin verification:", { userId: authData.session.user.id, isAdmin });
       if (!isAdmin) {
         await supabase.auth.signOut();
         notify("هذا الحساب ليس مسؤولاً.", "error");
@@ -1545,6 +1618,28 @@ function AdminPortal({ catalog }) {
     }
     publishMenuChange();
     notify("تم حذف المنتج بنجاح.", "success");
+  };
+
+  const duplicateProduct = async (product) => {
+    const copy = {
+      ...product,
+      name: `${product.name} (نسخة)`,
+    };
+    delete copy.id;
+    delete copy.uuid;
+    if (configured && session) {
+      const { data: inserted, error } = await supabase.from("products").insert(toSupabaseProduct(copy)).select().single();
+      if (error) {
+        notify("تعذر نسخ المنتج في Supabase.", "error");
+        return;
+      }
+      persistItems([...items, fromSupabaseProduct(inserted, items.length)]);
+      await refreshProducts();
+    } else {
+      persistItems([...items, { ...copy, id: Date.now() }]);
+    }
+    publishMenuChange();
+    notify("تم نسخ المنتج. عدّل النسخة الجديدة كما تريد.", "success");
   };
 
   const updateProduct = async (product, patch) => {
@@ -1638,7 +1733,7 @@ function AdminPortal({ catalog }) {
           notify("تعذر إضافة الإضافات إلى Supabase: " + error.message, "error");
           return;
         }
-        const { data } = await supabase.from("products").select("*").order("sort_order", { ascending: true });
+        const { data } = await supabase.from("products").select("*").order("sort_order", { ascending: true }).order("id", { ascending: true });
         persistItems(dedupeProducts((data || []).map((row, index) => fromSupabaseProduct(row, index))));
       } else {
         saveLocal(dedupeProducts([...items, ...missing]));
@@ -1730,14 +1825,19 @@ function AdminPortal({ catalog }) {
           <section className="mt-6">
             {query.trim() && <p className="mb-3 text-sm font-bold text-slate-500">{filtered.length ? `${filtered.length} نتيجة` : "لا توجد نتائج مطابقة للبحث."}</p>}
             <div className="grid gap-3" style={{ minHeight: "200px" }}>
-              {filtered.map((product) => (
-                <AdminProductRow key={`${product.uuid || product.id}-${product.name}`} product={product} onUpdate={updateProduct} onDelete={removeProduct} uploadImage={uploadImage} notify={notify} />
+              {visibleProducts.map((product) => (
+                <AdminProductRow key={`${product.uuid || product.id}-${product.name}`} product={product} onUpdate={updateProduct} onDelete={removeProduct} onDuplicate={duplicateProduct} uploadImage={uploadImage} notify={notify} />
               ))}
             </div>
+            {filtered.length > visibleProducts.length && (
+              <button onClick={() => setVisibleCount((count) => count + 30)} className="mt-4 w-full rounded-lg bg-blaben-50 px-4 py-3 text-sm font-black text-blaben-850">
+                عرض المزيد ({filtered.length - visibleProducts.length} متبقي)
+              </button>
+            )}
           </section>
         </>
       ) : (
-        <AdminCategoryManager products={source} configured={configured} session={session} onRenameCategory={renameCategory} onDeleteCategory={deleteCategory} notify={notify} upsertCategoryImage={upsertCategoryImage} upsertCategoryOrder={upsertCategoryOrder} deleteCategoryImage={deleteCategoryImage} uploadImage={uploadImage} />
+        <AdminCategoryManager products={catalog} configured={configured} session={session} onRenameCategory={renameCategory} onDeleteCategory={deleteCategory} notify={notify} upsertCategoryImage={upsertCategoryImage} upsertCategoryOrder={upsertCategoryOrder} deleteCategoryImage={deleteCategoryImage} uploadImage={uploadImage} />
       )}
     </main>
   );
@@ -1988,20 +2088,42 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
   const [busy, setBusy] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [dragIndex, setDragIndex] = useState(null);
-  const [catImages, setCatImages] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem("blabenCategoryImages") || "{}");
-    } catch {
-      return {};
+  const [catImages, setCatImages] = useState({});
+  const [catOrder, setCatOrder] = useState([]);
+
+  // Keep the admin's view of category images/order in sync with the SAME
+  // live Supabase data the public menu renders from. Previously this state
+  // was seeded once from a per-browser localStorage cache, which could
+  // silently drift from Supabase (e.g. after an edit from another device,
+  // or another admin) — causing the admin panel to show a different image
+  // or order than what visitors actually saw. When Supabase isn't
+  // configured at all, fall back to localStorage so offline/local-only
+  // mode still works.
+  useEffect(() => {
+    if (configured) {
+      const images = {};
+      const orderEntries = new Map();
+      products.forEach((product) => {
+        if (product.categoryImage && !images[product.category]) images[product.category] = product.categoryImage;
+        if (product.categorySort != null && !orderEntries.has(product.category)) {
+          orderEntries.set(product.category, product.categorySort);
+        }
+      });
+      setCatImages(images);
+      setCatOrder([...orderEntries.entries()].sort((a, b) => a[1] - b[1]).map(([name]) => name));
+      return;
     }
-  });
-  const [catOrder, setCatOrder] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem("blabenCategoryOrder") || "[]");
+      setCatImages(JSON.parse(localStorage.getItem("blabenCategoryImages") || "{}"));
     } catch {
-      return [];
+      setCatImages({});
     }
-  });
+    try {
+      setCatOrder(JSON.parse(localStorage.getItem("blabenCategoryOrder") || "[]"));
+    } catch {
+      setCatOrder([]);
+    }
+  }, [products, configured]);
 
   const counts = useMemo(() => {
     const map = new Map();
@@ -2021,15 +2143,19 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
   // Local cache is kept only so THIS admin's screen updates instantly and
   // still works when Supabase isn't configured. The public menu no longer
   // trusts this cache — it reads sort_order/image_url from Supabase.
+  const [savingOrder, setSavingOrder] = useState(false);
   const saveCatOrder = async (next) => {
     localStorage.setItem("blabenCategoryOrder", JSON.stringify(next));
     setCatOrder(next);
     if (!(configured && session)) return;
+    setSavingOrder(true);
     try {
       await upsertCategoryOrder(next);
     } catch (error) {
       console.error("Could not sync category order", error);
       notify("تعذر مزامنة ترتيب التصنيفات مع الخادم. الترتيب محفوظ على هذا الجهاز فقط.", "error");
+    } finally {
+      setSavingOrder(false);
     }
   };
 
@@ -2141,17 +2267,18 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
           {configured && session ? " (يُحفظ مباشرة في Supabase، وكل الأجهزة تشوف التغيير فوراً)" : " (يُحفظ محلياً فقط لأن Supabase غير مفعل حالياً)"}.
           اسحب التصنيف لأعلى أو أسفل لتغيير ترتيب العرض في المنيو العام.
         </p>
+        {savingOrder && <p className="mt-2 text-sm font-black text-blaben-700">جاري حفظ الترتيب...</p>}
       </div>
       {categories.length ? (
         <div className="grid gap-3">
           {categories.map((name, index) => (
             <article
               key={name}
-              draggable
+              draggable={!savingOrder}
               onDragStart={() => handleDragStart(index)}
               onDragOver={handleDragOver}
               onDrop={() => handleDrop(index)}
-              className={`grid gap-3 rounded-lg border bg-white p-3 shadow-sm transition sm:p-4 ${dragIndex === index ? "border-blaben-850 opacity-50" : "border-blue-100"}`}
+              className={`grid gap-3 rounded-lg border bg-white p-3 shadow-sm transition sm:p-4 ${dragIndex === index ? "border-blaben-850 opacity-50" : "border-blue-100"} ${savingOrder ? "opacity-60" : ""}`}
             >
               {/* Mobile: top row with order + image + move buttons */}
               <div className="flex items-center gap-3">
@@ -2172,8 +2299,8 @@ function AdminCategoryManager({ products, configured, session, onRenameCategory,
                 />
                 {/* Move up/down buttons (work on all devices including touch) */}
                 <div className="flex shrink-0 flex-col gap-1">
-                  <button type="button" disabled={index === 0} onClick={() => moveCategory(index, -1)} className="rounded bg-blaben-50 px-2 py-0.5 text-xs font-black text-blaben-700 disabled:opacity-30" title="تحريك لأعلى">▲</button>
-                  <button type="button" disabled={index === categories.length - 1} onClick={() => moveCategory(index, 1)} className="rounded bg-blaben-50 px-2 py-0.5 text-xs font-black text-blaben-700 disabled:opacity-30" title="تحريك لأسفل">▼</button>
+                  <button type="button" disabled={savingOrder || index === 0} onClick={() => moveCategory(index, -1)} className="rounded bg-blaben-50 px-2 py-0.5 text-xs font-black text-blaben-700 disabled:opacity-30" title="تحريك لأعلى">▲</button>
+                  <button type="button" disabled={savingOrder || index === categories.length - 1} onClick={() => moveCategory(index, 1)} className="rounded bg-blaben-50 px-2 py-0.5 text-xs font-black text-blaben-700 disabled:opacity-30" title="تحريك لأسفل">▼</button>
                 </div>
               </div>
               {/* Bottom row: meta info + actions */}
@@ -2234,10 +2361,20 @@ function VariantEditor({ variants, onChange }) {
   );
 }
 
-function AdminProductRow({ product, onUpdate, onDelete, uploadImage, notify }) {
+function AdminProductRow({ product, onUpdate, onDelete, onDuplicate, uploadImage, notify }) {
   const [draft, setDraft] = useState(product);
   const [uploading, setUploading] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [togglingState, setTogglingState] = useState(false);
   useEffect(() => setDraft(product), [product]);
+  useEffect(() => {
+    if (!confirmingDelete) return;
+    const timer = setTimeout(() => setConfirmingDelete(false), 4000);
+    return () => clearTimeout(timer);
+  }, [confirmingDelete]);
+
+  const isDirty = JSON.stringify(draft) !== JSON.stringify(product);
+
   const updateImage = async (file) => {
     if (!file || !isAllowedImageFile(file)) {
       notify("صورة المنتج يجب أن تكون PNG أو JPG أو WEBP أو GIF وأقل من 3MB.", "error");
@@ -2255,6 +2392,28 @@ function AdminProductRow({ product, onUpdate, onDelete, uploadImage, notify }) {
       setUploading(false);
     }
   };
+
+  // One-tap "sold out today" toggle — the single most common daily action
+  // for a food menu — without needing to open the edit form and save.
+  const toggleAvailability = async () => {
+    setTogglingState(true);
+    const nextState = product.state === "unavailable" ? "available" : "unavailable";
+    try {
+      await onUpdate(product, { state: nextState });
+    } finally {
+      setTogglingState(false);
+    }
+  };
+
+  const handleDeleteClick = () => {
+    if (!confirmingDelete) {
+      setConfirmingDelete(true);
+      return;
+    }
+    setConfirmingDelete(false);
+    onDelete(product);
+  };
+
   return (
     <article className="grid gap-3 rounded-lg border border-blue-100 bg-white p-3 shadow-sm">
       {/* Mobile: image row */}
@@ -2268,7 +2427,18 @@ function AdminProductRow({ product, onUpdate, onDelete, uploadImage, notify }) {
         </div>
         {/* Fields */}
         <div className="grid min-w-0 flex-1 gap-2">
-          <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: limitText(e.target.value, 90) })} placeholder="اسم المنتج" className="w-full rounded-lg border border-blue-100 p-2 text-sm sm:text-base" />
+          <div className="flex items-start justify-between gap-2">
+            <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: limitText(e.target.value, 90) })} placeholder="اسم المنتج" className="w-full rounded-lg border border-blue-100 p-2 text-sm sm:text-base" />
+            <button
+              type="button"
+              onClick={toggleAvailability}
+              disabled={togglingState}
+              title="تبديل سريع بدون فتح التعديل"
+              className={`shrink-0 rounded-lg px-2 py-2 text-xs font-black transition disabled:opacity-50 ${product.state === "unavailable" ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-700"}`}
+            >
+              {togglingState ? "..." : product.state === "unavailable" ? "غير متاح" : "متاح"}
+            </button>
+          </div>
           <div className="grid grid-cols-2 gap-2">
             <input value={draft.category} onChange={(e) => setDraft({ ...draft, category: limitText(e.target.value, 70) })} placeholder="التصنيف" className="rounded-lg border border-blue-100 p-2 text-sm sm:text-base" />
             <input value={draft.price} onChange={(e) => setDraft({ ...draft, price: limitText(e.target.value, 60) })} placeholder="السعر" className="rounded-lg border border-blue-100 p-2 text-sm sm:text-base" />
@@ -2282,9 +2452,14 @@ function AdminProductRow({ product, onUpdate, onDelete, uploadImage, notify }) {
       </div>
       <textarea value={draft.description || ""} onChange={(e) => setDraft({ ...draft, description: limitText(e.target.value, 500) })} placeholder="الوصف" className="w-full rounded-lg border border-blue-100 p-2 text-sm sm:text-base" rows="2" />
       <VariantEditor variants={draft.variants} onChange={(next) => setDraft({ ...draft, variants: next })} />
-      <div className="flex gap-2">
-        <button onClick={() => onUpdate(product, draft)} className="flex-1 rounded-lg bg-blaben-850 px-4 py-2 text-sm font-black text-white sm:flex-none sm:text-base">حفظ</button>
-        <button onClick={() => onDelete(product)} className="flex-1 rounded-lg bg-red-50 px-4 py-2 text-sm font-black text-red-600 sm:flex-none sm:text-base">حذف</button>
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => onUpdate(product, draft)} disabled={!isDirty} className="flex-1 rounded-lg bg-blaben-850 px-4 py-2 text-sm font-black text-white disabled:opacity-40 sm:flex-none sm:text-base">
+          {isDirty ? "حفظ" : "لا يوجد تغييرات"}
+        </button>
+        <button onClick={() => onDuplicate(product)} className="flex-1 rounded-lg bg-blaben-50 px-4 py-2 text-sm font-black text-blaben-850 sm:flex-none sm:text-base">نسخ</button>
+        <button onClick={handleDeleteClick} className={`flex-1 rounded-lg px-4 py-2 text-sm font-black transition sm:flex-none sm:text-base ${confirmingDelete ? "bg-red-600 text-white" : "bg-red-50 text-red-600"}`}>
+          {confirmingDelete ? "اضغط للتأكيد" : "حذف"}
+        </button>
       </div>
     </article>
   );
