@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient } from "@supabase/supabase-js";
-import "./styles.css";
+import "./style.css";
 
 const ASSET = "/menu-assets/";
 const CUSTOM_KEY = "blabenCustomProducts";
