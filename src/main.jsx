@@ -781,7 +781,7 @@ function Intro({ ready }) {
 
 function ProductCard({ product, onOpen, compact = false }) {
   return (
-    <article tabIndex={0} role="button" onClick={() => onOpen(product)} onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && onOpen(product)} className={`group overflow-hidden rounded-lg border border-blue-100 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-luxe focus:outline-none focus:ring-4 focus:ring-blue-200 ${compact ? "" : "reveal-card"}`}>
+    <article tabIndex={0} role="button" onClick={() => onOpen(product)} onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && onOpen(product)} className={`group relative overflow-hidden rounded-lg border border-blue-100 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-luxe focus:outline-none focus:ring-4 focus:ring-blue-200 active:scale-[0.98] ${compact ? "" : "reveal-card"}`}>
       <div className={`${compact ? "h-36" : "h-48"} relative overflow-hidden bg-blaben-50`}>
         <img loading="lazy" decoding="async" src={asset(product.image)} alt={product.name} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
         {product.state === "unavailable" && <span className="absolute start-3 top-3 rounded-full bg-red-600 px-3 py-1 text-xs font-black text-white shadow-md">غير متاح</span>}
@@ -790,7 +790,13 @@ function ProductCard({ product, onOpen, compact = false }) {
       <div className="grid gap-2 p-4">
         <h3 className="text-lg font-black leading-relaxed text-blaben-950">{product.name}</h3>
         {product.description && <p className="line-clamp-3 text-sm leading-7 text-slate-500">{product.description}</p>}
-        <span className="w-max rounded-full bg-blaben-100 px-3 py-2 text-sm font-black text-blaben-850">{priceSummary(product)}</span>
+        <div className="flex items-center justify-between gap-2">
+          <span className="w-max rounded-full bg-blaben-100 px-3 py-2 text-sm font-black text-blaben-850">{priceSummary(product)}</span>
+          <span className="flex items-center gap-1 text-sm font-black text-blaben-700 transition group-hover:gap-2">
+            التفاصيل
+            <span aria-hidden="true">‹</span>
+          </span>
+        </div>
       </div>
     </article>
   );
@@ -825,15 +831,20 @@ function ProductModal({ product, onClose }) {
   if (!product) return null;
   const pricing = priceDetails(product);
   return (
-    <div className="fixed inset-0 z-[70] grid place-items-center p-4">
+    <div className="fixed inset-0 z-[70] flex items-end justify-center md:items-center md:p-4">
       <button className="absolute inset-0 bg-blaben-950/55 backdrop-blur-md" aria-label="إغلاق" onClick={onClose} />
-      <section role="dialog" aria-modal="true" className="relative grid max-h-[calc(100vh-2rem)] w-full max-w-4xl overflow-hidden rounded-lg bg-white shadow-2xl md:grid-cols-[.95fr_1fr]">
+      <section
+        role="dialog"
+        aria-modal="true"
+        className="relative grid w-full max-w-4xl animate-slideUp overflow-hidden rounded-t-2xl bg-white shadow-2xl md:grid-cols-[.95fr_1fr] md:rounded-lg"
+        style={{ maxHeight: "calc(100dvh - 2rem)" }}
+      >
         <button className="absolute start-3 top-3 z-10 grid h-11 w-11 place-items-center rounded-full bg-white/90 text-2xl font-black text-blaben-950 shadow" onClick={onClose} aria-label="إغلاق">×</button>
-        <div className="relative h-72 bg-blaben-50 md:h-full md:min-h-[430px]">
+        <div className="relative h-56 shrink-0 bg-blaben-50 md:h-full md:min-h-[430px]">
           <img loading="lazy" decoding="async" src={asset(product.image)} alt={product.name} className="h-full w-full object-cover" />
           {product.state === "coming_soon" && <span className="absolute start-3 top-3 rounded-full bg-amber-500 px-3 py-1.5 text-sm font-black text-white shadow-md animate-pulse">{COMING_SOON_LABEL}</span>}
         </div>
-        <div className="grid content-center gap-4 overflow-y-auto p-6 md:p-10">
+        <div className="grid content-start gap-4 overflow-y-auto p-6 md:content-center md:p-10">
           <p className="font-black text-blaben-700">{product.category}</p>
           <h2 className="text-3xl font-black leading-tight text-blaben-950 md:text-5xl">{product.name}</h2>
           <p className="leading-8 text-slate-600">{product.description || "لا يوجد وصف إضافي لهذا المنتج حاليا."}</p>
@@ -1299,10 +1310,12 @@ function Version7({ groups, onOpen }) {
       {/* ── Back to top ── */}
       <button
         className={`v7-back-to-top ${showTop ? "visible" : ""}`}
+        style={{ width: "auto", height: "auto", borderRadius: "999px", padding: "10px 18px", display: "flex", alignItems: "center", gap: "8px", fontSize: "1rem" }}
         onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
         aria-label="العودة للأعلى"
       >
-        ↑
+        <span aria-hidden="true" style={{ fontSize: "1.3rem", lineHeight: 1 }}>↑</span>
+        <span style={{ fontWeight: 900 }}>للأعلى</span>
       </button>
     </main>
   );
@@ -1312,11 +1325,31 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [showTop, setShowTop] = useState(false);
+  const [showTapHint, setShowTapHint] = useState(() => {
+    try {
+      return !localStorage.getItem("blabenSeenProductTapHint");
+    } catch {
+      return true;
+    }
+  });
   const searchResults = useMemo(() => (query.trim() ? catalog.filter((product) => productMatches(product, query)) : []), [catalog, query]);
   const selectedGroup = selectedCategory === null ? null : groups[selectedCategory];
   const chooseCategory = (index) => {
     setSelectedCategory(index);
     window.setTimeout(scrollToProductPanel, 40);
+  };
+  const dismissTapHint = () => {
+    if (!showTapHint) return;
+    setShowTapHint(false);
+    try {
+      localStorage.setItem("blabenSeenProductTapHint", "1");
+    } catch {
+      /* ignore */
+    }
+  };
+  const handleProductOpen = (product) => {
+    dismissTapHint();
+    onOpen(product);
   };
 
   useEffect(() => {
@@ -1328,7 +1361,7 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
 
   return (
     <>
-      <PublicHeader query={query} onQuery={setQuery} results={searchResults} onOpen={onOpen} />
+      <PublicHeader query={query} onQuery={setQuery} results={searchResults} onOpen={handleProductOpen} />
       <main className="mx-auto w-[min(1240px,calc(100%-24px))] pb-20">
         <section className="grid gap-4 pt-6 sm:grid-cols-2 lg:grid-cols-4" aria-label="تصنيفات المنيو">
           {groups.map((group, index) => (
@@ -1372,17 +1405,26 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
                 <h2 className="text-3xl font-black text-blaben-950 md:text-5xl">{selectedGroup.name}</h2>
                 <span className="shrink-0 text-sm text-slate-500">{selectedGroup.items.length} منتج</span>
               </div>
+              {showTapHint && (
+                <p className="mb-3 flex items-center gap-2 rounded-lg bg-blaben-50 px-4 py-2.5 text-sm font-black text-blaben-850">
+                  <span aria-hidden="true">💡</span>
+                  اضغط على أي منتج لعرض التفاصيل والسعر
+                </p>
+              )}
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {selectedGroup.items.map((product) => (
-                  <button key={`${selectedGroup.name}-${product.id}`} type="button" className="v6-list-card reveal-card" onClick={() => onOpen(product)}>
+                  <button key={`${selectedGroup.name}-${product.id}`} type="button" className="v6-list-card reveal-card" onClick={() => handleProductOpen(product)}>
                     <span className="relative block shrink-0">
                       <img loading="lazy" decoding="async" src={asset(product.image)} alt={product.name} />
                       {product.state === "coming_soon" && <span className="absolute start-1 top-1 rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-black text-white shadow-md animate-pulse">{COMING_SOON_LABEL}</span>}
                     </span>
-                    <div className="grid gap-1 text-right">
-                      <h3 className="text-sm font-black leading-relaxed text-blaben-950">{product.name}</h3>
-                      <span className="text-xs font-bold text-blaben-700">{priceSummary(product)}</span>
-                      {product.state === "unavailable" && <span className="text-xs font-bold text-red-500">غير متاح</span>}
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                      <div className="grid gap-1 text-right">
+                        <h3 className="text-sm font-black leading-relaxed text-blaben-950">{product.name}</h3>
+                        <span className="text-xs font-bold text-blaben-700">{priceSummary(product)}</span>
+                        {product.state === "unavailable" && <span className="text-xs font-bold text-red-500">غير متاح</span>}
+                      </div>
+                      <span className="text-lg text-blaben-300" aria-hidden="true">‹</span>
                     </div>
                   </button>
                 ))}
@@ -1399,10 +1441,11 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
       <button
         type="button"
         onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-        className={`fixed bottom-5 right-5 z-40 grid h-12 w-12 place-items-center rounded-full bg-blaben-850 text-2xl font-black text-white shadow-luxe transition ${showTop ? "translate-y-0 opacity-100 animate-floatSoft" : "pointer-events-none translate-y-4 opacity-0"}`}
+        className={`fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full bg-blaben-850 px-4 py-3 text-white shadow-luxe transition ${showTop ? "translate-y-0 opacity-100 animate-floatSoft" : "pointer-events-none translate-y-4 opacity-0"}`}
         aria-label="العودة إلى أعلى الصفحة"
       >
-        ↑
+        <span className="text-xl font-black leading-none" aria-hidden="true">↑</span>
+        <span className="text-sm font-black">للأعلى</span>
       </button>
     </>
   );
