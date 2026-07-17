@@ -602,10 +602,9 @@ function useCatalog() {
     }
 
     async function loadFromSupabase() {
-      const [productsResponse, categoryResponse, menuData] = await Promise.all([
+      const [productsResponse, categoryResponse] = await Promise.all([
         supabase.from("products").select("*").order("sort_order", { ascending: true }).order("id", { ascending: true }),
         supabase.from("category_images").select("category,image_url,sort_order"),
-        loadMenuData().catch(() => null),
       ]);
       if (ignore) return;
       if (productsResponse.error || !productsResponse.data || !productsResponse.data.length) {
@@ -613,12 +612,6 @@ function useCatalog() {
         return;
       }
       const products = productsResponse.data.map((row, index) => fromSupabaseProduct(row, index));
-      const staticProducts = menuData ? normalizeStaticMenu(menuData) : [];
-      const defaultCategoryImages = new Map(
-        staticProducts
-          .filter((product) => product.categoryImage)
-          .map((product) => [product.category, product.categoryImage])
-      );
       const savedCategoryImages = categoryResponse.error
         ? new Map()
         : new Map(
@@ -626,7 +619,6 @@ function useCatalog() {
               .filter((row) => row.image_url)
               .map((row) => [row.category, row.image_url])
           );
-      const categoryImageMap = new Map([...defaultCategoryImages, ...savedCategoryImages]);
       const categoryOrderMap = categoryResponse.error
         ? new Map()
         : new Map(
@@ -634,7 +626,27 @@ function useCatalog() {
               .filter((row) => row.sort_order != null)
               .map((row) => [row.category, row.sort_order])
           );
-      setCatalog(dedupeProducts(mergeCategoryImages(products, categoryImageMap, categoryOrderMap)));
+
+      // Render immediately with what we have — don't make visitors wait on
+      // the static menu-data.json fetch, which is only used to fill in
+      // default category images for categories that don't have one saved
+      // in Supabase yet. This used to be part of the same Promise.all,
+      // so a slow static-file fetch delayed the entire menu from appearing
+      // even after the actual product data had already arrived.
+      setCatalog(dedupeProducts(mergeCategoryImages(products, savedCategoryImages, categoryOrderMap)));
+
+      loadMenuData()
+        .then((menuData) => {
+          if (ignore || !menuData) return;
+          const staticProducts = normalizeStaticMenu(menuData);
+          const defaultCategoryImages = new Map(
+            staticProducts.filter((product) => product.categoryImage).map((product) => [product.category, product.categoryImage])
+          );
+          if (!defaultCategoryImages.size) return;
+          const categoryImageMap = new Map([...defaultCategoryImages, ...savedCategoryImages]);
+          setCatalog(dedupeProducts(mergeCategoryImages(products, categoryImageMap, categoryOrderMap)));
+        })
+        .catch(() => {});
     }
 
     loadFromSupabase();
@@ -666,14 +678,17 @@ function useCatalog() {
   return catalog;
 }
 
-function useIntro() {
-  const [ready, setReady] = useState(false);
+function useIntro(loaded) {
+  const [slow, setSlow] = useState(false);
   useEffect(() => {
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const timer = window.setTimeout(() => setReady(true), reduced ? 80 : 3000);
+    if (loaded) {
+      setSlow(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setSlow(true), 6000);
     return () => window.clearTimeout(timer);
-  }, []);
-  return ready;
+  }, [loaded]);
+  return slow;
 }
 
 function Header({ current }) {
@@ -771,10 +786,20 @@ function PublicHeader({ query, onQuery, results, onOpen }) {
   );
 }
 
-function Intro({ ready }) {
+function Intro({ ready, slow }) {
   return (
-    <div className={`fixed inset-0 z-50 grid place-items-center bg-white transition duration-500 ${ready ? "pointer-events-none invisible opacity-0" : "opacity-100"}`} aria-hidden="true">
-      <img src={asset("b.laben logo.jfif")} alt="" className="w-44 rounded-full animate-introPop md:w-56" />
+    <div className={`fixed inset-0 z-50 grid place-items-center bg-white transition duration-500 ${ready ? "pointer-events-none invisible opacity-0" : "opacity-100"}`} aria-hidden={ready}>
+      <div className="grid place-items-center gap-4">
+        <img src={asset("b.laben logo.jfif")} alt="" className="w-44 rounded-full animate-introPop md:w-56" />
+        {slow && !ready && (
+          <div className="mx-auto mt-2 max-w-xs rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
+            <p className="text-sm font-bold text-amber-800">التحميل يستغرق وقتا أطول من المعتاد. تحقق من اتصال الإنترنت أو أعد تحميل الصفحة.</p>
+            <button type="button" onClick={() => window.location.reload()} className="mt-3 rounded-lg bg-amber-600 px-4 py-2 text-sm font-black text-white">
+              إعادة تحميل الصفحة
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -844,7 +869,7 @@ function ProductModal({ product, onClose }) {
           <img loading="lazy" decoding="async" src={asset(product.image)} alt={product.name} className="h-full w-full object-cover" />
           {product.state === "coming_soon" && <span className="absolute start-3 top-3 rounded-full bg-amber-500 px-3 py-1.5 text-sm font-black text-white shadow-md animate-pulse">{COMING_SOON_LABEL}</span>}
         </div>
-        <div className="grid content-start gap-4 overflow-y-auto p-6 md:content-center md:p-10">
+        <div className="grid min-h-0 content-start gap-4 overflow-y-auto p-6 md:content-center md:p-10">
           <p className="font-black text-blaben-700">{product.category}</p>
           <h2 className="text-3xl font-black leading-tight text-blaben-950 md:text-5xl">{product.name}</h2>
           <p className="leading-8 text-slate-600">{product.description || "لا يوجد وصف إضافي لهذا المنتج حاليا."}</p>
@@ -1384,18 +1409,23 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
 
         <section id="products-panel" className="mt-10 grid scroll-mt-28 gap-5">
           {selectedGroup && (
-            <nav className="sticky top-[68px] z-30 -mx-3 overflow-x-auto rounded-lg border border-blue-100 bg-white/95 px-3 py-3 shadow-sm backdrop-blur-xl md:top-[82px]" aria-label="تغيير التصنيف">
-              <div className="flex min-w-max gap-2">
-                {groups.map((group, index) => (
-                  <button
-                    key={`sticky-${group.name}`}
-                    type="button"
-                    onClick={() => chooseCategory(index)}
-                    className={`rounded-full px-4 py-2 text-sm font-black transition ${selectedCategory === index ? "bg-blaben-850 text-white shadow" : "bg-blaben-50 text-blaben-850 hover:bg-blaben-100"}`}
-                  >
-                    {group.name}
-                  </button>
-                ))}
+            <nav className="sticky top-[68px] z-30 -mx-3 rounded-lg border border-blue-100 bg-white/95 px-3 py-3 shadow-sm backdrop-blur-xl md:top-[82px]" aria-label="تغيير التصنيف">
+              <p className="mb-2 text-xs font-black text-slate-400">تصفح تصنيف آخر:</p>
+              <div className="relative -mx-1">
+                <div className="flex min-w-max gap-2 overflow-x-auto px-1 pb-1">
+                  {groups.map((group, index) => (
+                    <button
+                      key={`sticky-${group.name}`}
+                      type="button"
+                      onClick={() => chooseCategory(index)}
+                      className={`shrink-0 rounded-full border px-4 py-2 text-sm font-black transition ${selectedCategory === index ? "border-blaben-850 bg-blaben-850 text-white shadow" : "border-blue-100 bg-white text-blaben-850 hover:border-blaben-850 hover:bg-blaben-50"}`}
+                    >
+                      {group.name}
+                    </button>
+                  ))}
+                </div>
+                <span className="pointer-events-none absolute inset-y-0 start-0 w-6 bg-gradient-to-r from-white/95 to-transparent" aria-hidden="true" />
+                <span className="pointer-events-none absolute inset-y-0 end-0 w-6 bg-gradient-to-l from-white/95 to-transparent" aria-hidden="true" />
               </div>
             </nav>
           )}
@@ -1413,7 +1443,7 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
               )}
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {selectedGroup.items.map((product) => (
-                  <button key={`${selectedGroup.name}-${product.id}`} type="button" className="v6-list-card reveal-card" onClick={() => handleProductOpen(product)}>
+                  <button key={`${selectedGroup.name}-${product.id}`} type="button" className="v6-list-card reveal-card relative" onClick={() => handleProductOpen(product)}>
                     <span className="relative block shrink-0">
                       <img loading="lazy" decoding="async" src={asset(product.image)} alt={product.name} />
                       {product.state === "coming_soon" && <span className="absolute start-1 top-1 rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-black text-white shadow-md animate-pulse">{COMING_SOON_LABEL}</span>}
@@ -1426,6 +1456,7 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
                       </div>
                       <span className="text-lg text-blaben-300" aria-hidden="true">‹</span>
                     </div>
+                    <span className="absolute bottom-1 left-1 rounded-full bg-blaben-950/75 px-2 py-0.5 text-[10px] font-bold text-white">انقر لعرض التفاصيل</span>
                   </button>
                 ))}
               </div>
@@ -2520,7 +2551,8 @@ function Field({ label, name, placeholder }) {
 function App() {
   const catalog = useCatalog();
   const groups = useMemo(() => groupProducts(catalog), [catalog]);
-  const ready = useIntro();
+  const ready = catalog.length > 0;
+  const slow = useIntro(ready);
   const [selected, setSelected] = useState(null);
   const path = window.location.pathname;
 
@@ -2537,8 +2569,8 @@ function App() {
   if (path === "/" || path.endsWith("/index.html")) {
     return (
       <>
-        <Intro ready={ready} />
-        {catalog.length ? <FinalPublicMenu groups={groups} catalog={catalog} onOpen={setSelected} /> : <main className="min-h-[70vh]" />}
+        <Intro ready={ready} slow={slow} />
+        {ready && <FinalPublicMenu groups={groups} catalog={catalog} onOpen={setSelected} />}
         <ProductModal product={selected} onClose={() => setSelected(null)} />
       </>
     );
@@ -2547,9 +2579,8 @@ function App() {
   const current = path;
   return (
     <>
-      {!path.includes("staff-portal") && <Intro ready={ready} />}
+      {!path.includes("staff-portal") && <Intro ready={ready} slow={slow} />}
       {!path.includes("staff-portal") && <Header current={current} />}
-      {!catalog.length && !path.includes("staff-portal") ? <main className="min-h-[70vh]" /> : null}
       {catalog.length && path.includes("version-1") ? <Version1 groups={groups} onOpen={setSelected} /> : null}
       {catalog.length && path.includes("version-2") ? <Version2 groups={groups} onOpen={setSelected} /> : null}
       {catalog.length && path.includes("version-3") ? <Version3 groups={groups} onOpen={setSelected} /> : null}
