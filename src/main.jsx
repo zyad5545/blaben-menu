@@ -780,7 +780,7 @@ function Intro({ ready }) {
         src={asset("b.laben logo.jfif")}
         alt=""
         className="w-44 rounded-full md:w-56"
-        style={{ animation: "introPop 1.4s cubic-bezier(.2,.8,.2,1) both, floatSoft 2.6s ease-in-out infinite 1.4s" }}
+        style={{ animation: "introPop 2.35s cubic-bezier(.2,.8,.2,1) infinite" }}
       />
     </div>
   );
@@ -1370,13 +1370,13 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
     <>
       <PublicHeader query={query} onQuery={setQuery} results={searchResults} onOpen={handleProductOpen} />
       <main className="mx-auto w-[min(1240px,calc(100%-24px))] pb-20">
-        <section className="grid gap-4 pt-6 sm:grid-cols-2 lg:grid-cols-4" aria-label="تصنيفات المنيو">
+        <section className="grid grid-cols-1 gap-4 pt-6 sm:grid-cols-2 lg:grid-cols-4" aria-label="تصنيفات المنيو">
           {groups.map((group, index) => (
             <button
               key={group.name}
               type="button"
               onClick={() => chooseCategory(index)}
-              className={`relative min-h-64 overflow-hidden rounded-lg text-right text-white shadow-luxe transition hover:-translate-y-1 ${selectedCategory === index || (selectedCategory === null && index === 0) ? "ring-4 ring-blaben-100" : ""}`}
+              className={`relative min-h-64 w-full overflow-hidden rounded-lg text-right text-white shadow-luxe transition hover:-translate-y-1 ${selectedCategory === index || (selectedCategory === null && index === 0) ? "ring-4 ring-blaben-100" : ""}`}
             >
               <img loading="lazy" decoding="async" src={asset(group.image)} alt="" className="absolute inset-0 h-full w-full object-cover transition duration-500 hover:scale-105" />
               <span className="absolute inset-0 bg-gradient-to-t from-blaben-950/90 via-blaben-950/24 to-transparent" />
@@ -1424,7 +1424,7 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
               )}
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {selectedGroup.items.map((product) => (
-                  <button key={`${selectedGroup.name}-${product.id}`} type="button" className="v6-list-card reveal-card relative" onClick={() => handleProductOpen(product)}>
+                  <button key={`${selectedGroup.name}-${product.id}`} type="button" className="v6-list-card reveal-card" onClick={() => handleProductOpen(product)}>
                     <span className="relative block shrink-0">
                       <img loading="lazy" decoding="async" src={asset(product.image)} alt={product.name} />
                       {product.state === "coming_soon" && <span className="absolute start-1 top-1 rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-black text-white shadow-md animate-pulse">{COMING_SOON_LABEL}</span>}
@@ -1437,7 +1437,7 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
                       </div>
                       <span className="text-lg text-blaben-300" aria-hidden="true">‹</span>
                     </div>
-                    <span className="absolute bottom-1 left-1 rounded-full bg-blaben-950/75 px-2 py-0.5 text-[10px] font-bold text-white">انقر لعرض التفاصيل</span>
+                    <span className="w-max rounded-full bg-blaben-950/75 px-2 py-1 text-[10px] font-bold text-white" style={{ gridColumn: "1 / -1", justifySelf: "left" }}>انقر لعرض التفاصيل</span>
                   </button>
                 ))}
               </div>
