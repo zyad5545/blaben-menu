@@ -779,8 +779,8 @@ function Intro({ ready }) {
       <img
         src={asset("b.laben logo.jfif")}
         alt=""
-        className="w-44 rounded-full md:w-56"
-        style={{ animation: "introPop 2.35s cubic-bezier(.2,.8,.2,1) infinite" }}
+        className="w-44 rounded-full animate-introPop md:w-56"
+        style={{ animationIterationCount: "infinite" }}
       />
     </div>
   );
@@ -894,7 +894,7 @@ function Section({ group, index, onOpen }) {
         <h2 className="text-3xl font-black text-blaben-950 md:text-5xl">{group.name}</h2>
         <span className="shrink-0 text-slate-500">{group.items.length} منتج</span>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {group.items.map((product) => <ProductCard key={`${product.id}-${group.name}`} product={product} onOpen={onOpen} />)}
       </div>
     </section>
@@ -921,7 +921,7 @@ function Chooser() {
           <p className="mt-5 max-w-2xl leading-8 text-slate-500">نسخة React + Tailwind منظمة، سريعة، وسهلة التطوير.</p>
         </div>
       </section>
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map(([number, title, copy, href]) => (
           <a key={href} href={href} className="grid min-h-64 content-end gap-4 rounded-lg border border-blue-100 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-luxe">
             <span className="text-3xl font-black text-blaben-700">{number}</span>
@@ -968,7 +968,7 @@ function Version2({ groups, onOpen }) {
         <h1 className="mt-3 text-5xl font-black text-blaben-950 md:text-7xl">كل دنيا ليها طعمها</h1>
         <p className="mt-4 leading-8 text-slate-500">اختار التصنيف من الصور، والمنتجات هتظهر فوراً بشكل بسيط وواضح.</p>
       </section>
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {groups.map((item, index) => (
           <button key={item.name} onClick={() => setSelected(index)} className={`relative min-h-64 overflow-hidden rounded-lg text-right text-white shadow-luxe transition hover:-translate-y-1 ${selected === index ? "ring-4 ring-blaben-100" : ""}`}>
             <img loading="lazy" decoding="async" src={asset(item.image)} alt="" className="absolute inset-0 h-full w-full object-cover" />
@@ -1016,7 +1016,7 @@ function Version4({ groups, onOpen }) {
         <p className="font-black text-white/85">b.laben presentation menu</p>
         <h1 className="max-w-3xl text-6xl font-black leading-none text-white drop-shadow-2xl md:text-8xl">كل سكرول يحكي جزء من المنيو</h1>
         <p className="max-w-2xl leading-8 text-white/85">تجربة بسيطة وواضحة، لكن كل قسم يدخل بحركة زي شرائح العرض.</p>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {featured.map((product) => (
             <button key={product.id} onClick={() => onOpen(product)} className="reveal-panel relative min-h-64 overflow-hidden rounded-lg text-right text-white shadow-luxe">
               <img loading="lazy" decoding="async" src={asset(product.image)} alt={product.name} className="absolute inset-0 h-full w-full object-cover" />
@@ -1040,7 +1040,7 @@ function Version4({ groups, onOpen }) {
                 <p className="mt-4 leading-8">{lead.description || "اضغط على المنتج لعرض التفاصيل."}</p>
               </div>
             </button>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {group.items.slice(1, 7).map((product) => <ProductCard key={product.id} product={product} onOpen={onOpen} />)}
             </div>
           </section>
@@ -1163,7 +1163,7 @@ function Version6({ groups, onOpen }) {
               <h2 className="text-2xl font-black text-blaben-950 md:text-4xl">{group.name}</h2>
               <span className="shrink-0 text-sm text-slate-500">{group.items.length} منتج</span>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {group.items.map((product) => (
                 <button
                   key={`${product.id}-${group.name}`}
@@ -1422,7 +1422,7 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
                   اضغط على أي منتج لعرض التفاصيل والسعر
                 </p>
               )}
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {selectedGroup.items.map((product) => (
                   <button key={`${selectedGroup.name}-${product.id}`} type="button" className="v6-list-card reveal-card" onClick={() => handleProductOpen(product)}>
                     <span className="relative block shrink-0">
