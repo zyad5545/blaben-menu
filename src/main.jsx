@@ -780,7 +780,7 @@ function Intro({ ready }) {
         src={asset("b.laben logo.jfif")}
         alt=""
         className="w-44 rounded-full animate-introPop md:w-56"
-        style={{ animationIterationCount: "infinite" }}
+        style={{ animationIterationCount: "infinite", animationDirection: "alternate" }}
       />
     </div>
   );
@@ -1429,15 +1429,11 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
                       <img loading="lazy" decoding="async" src={asset(product.image)} alt={product.name} />
                       {product.state === "coming_soon" && <span className="absolute start-1 top-1 rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-black text-white shadow-md animate-pulse">{COMING_SOON_LABEL}</span>}
                     </span>
-                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
-                      <div className="grid gap-1 text-right">
-                        <h3 className="text-sm font-black leading-relaxed text-blaben-950">{product.name}</h3>
-                        <span className="text-xs font-bold text-blaben-700">{priceSummary(product)}</span>
-                        {product.state === "unavailable" && <span className="text-xs font-bold text-red-500">غير متاح</span>}
-                      </div>
-                      <span className="text-lg text-blaben-300" aria-hidden="true">‹</span>
+                    <div className="grid gap-1 text-right">
+                      <h3 className="text-sm font-black leading-relaxed text-blaben-950">{product.name}</h3>
+                      <span className="text-xs font-bold text-blaben-700">{priceSummary(product)}</span>
+                      {product.state === "unavailable" && <span className="text-xs font-bold text-red-500">غير متاح</span>}
                     </div>
-                    <span className="w-max rounded-full bg-blaben-950/75 px-2 py-1 text-[10px] font-bold text-white" style={{ gridColumn: "1 / -1", justifySelf: "left" }}>انقر لعرض التفاصيل</span>
                   </button>
                 ))}
               </div>
