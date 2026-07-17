@@ -779,8 +779,7 @@ function Intro({ ready }) {
       <img
         src={asset("b.laben logo.jfif")}
         alt=""
-        className="w-44 rounded-full animate-introPop md:w-56"
-        style={{ animationIterationCount: "infinite", animationDirection: "alternate" }}
+        className="w-44 rounded-full intro-logo md:w-56"
       />
     </div>
   );
@@ -1393,7 +1392,7 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
           {selectedGroup && (
             <nav className="sticky top-[68px] z-30 -mx-3 rounded-lg border border-blue-100 bg-white/95 px-3 py-3 shadow-sm backdrop-blur-xl md:top-[82px]" aria-label="تغيير التصنيف">
               <div className="relative -mx-1">
-                <div className="flex min-w-max gap-2 overflow-x-auto px-1 pb-1">
+                <div className="flex gap-2 overflow-x-auto px-1 pb-1">
                   {groups.map((group, index) => (
                     <button
                       key={`sticky-${group.name}`}
@@ -1434,6 +1433,7 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
                       <span className="text-xs font-bold text-blaben-700">{priceSummary(product)}</span>
                       {product.state === "unavailable" && <span className="text-xs font-bold text-red-500">غير متاح</span>}
                     </div>
+                    <span className="w-max rounded-full bg-blaben-950/75 px-2 py-1 text-[10px] font-bold text-white" style={{ gridColumn: "1 / -1", justifySelf: "left" }}>انقر لعرض التفاصيل</span>
                   </button>
                 ))}
               </div>
