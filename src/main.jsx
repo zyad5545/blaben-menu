@@ -678,19 +678,6 @@ function useCatalog() {
   return catalog;
 }
 
-function useIntro(loaded) {
-  const [slow, setSlow] = useState(false);
-  useEffect(() => {
-    if (loaded) {
-      setSlow(false);
-      return;
-    }
-    const timer = window.setTimeout(() => setSlow(true), 6000);
-    return () => window.clearTimeout(timer);
-  }, [loaded]);
-  return slow;
-}
-
 function Header({ current }) {
   const links = [
     ["01", "/version-1.html"],
@@ -786,20 +773,15 @@ function PublicHeader({ query, onQuery, results, onOpen }) {
   );
 }
 
-function Intro({ ready, slow }) {
+function Intro({ ready }) {
   return (
     <div className={`fixed inset-0 z-50 grid place-items-center bg-white transition duration-500 ${ready ? "pointer-events-none invisible opacity-0" : "opacity-100"}`} aria-hidden={ready}>
-      <div className="grid place-items-center gap-4">
-        <img src={asset("b.laben logo.jfif")} alt="" className="w-44 rounded-full animate-introPop md:w-56" />
-        {slow && !ready && (
-          <div className="mx-auto mt-2 max-w-xs rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
-            <p className="text-sm font-bold text-amber-800">التحميل يستغرق وقتا أطول من المعتاد. تحقق من اتصال الإنترنت أو أعد تحميل الصفحة.</p>
-            <button type="button" onClick={() => window.location.reload()} className="mt-3 rounded-lg bg-amber-600 px-4 py-2 text-sm font-black text-white">
-              إعادة تحميل الصفحة
-            </button>
-          </div>
-        )}
-      </div>
+      <img
+        src={asset("b.laben logo.jfif")}
+        alt=""
+        className="w-44 rounded-full md:w-56"
+        style={{ animation: "introPop 1.4s cubic-bezier(.2,.8,.2,1) both, floatSoft 2.6s ease-in-out infinite 1.4s" }}
+      />
     </div>
   );
 }
@@ -1410,7 +1392,6 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
         <section id="products-panel" className="mt-10 grid scroll-mt-28 gap-5">
           {selectedGroup && (
             <nav className="sticky top-[68px] z-30 -mx-3 rounded-lg border border-blue-100 bg-white/95 px-3 py-3 shadow-sm backdrop-blur-xl md:top-[82px]" aria-label="تغيير التصنيف">
-              <p className="mb-2 text-xs font-black text-slate-400">تصفح تصنيف آخر:</p>
               <div className="relative -mx-1">
                 <div className="flex min-w-max gap-2 overflow-x-auto px-1 pb-1">
                   {groups.map((group, index) => (
@@ -2552,7 +2533,6 @@ function App() {
   const catalog = useCatalog();
   const groups = useMemo(() => groupProducts(catalog), [catalog]);
   const ready = catalog.length > 0;
-  const slow = useIntro(ready);
   const [selected, setSelected] = useState(null);
   const path = window.location.pathname;
 
@@ -2569,7 +2549,7 @@ function App() {
   if (path === "/" || path.endsWith("/index.html")) {
     return (
       <>
-        <Intro ready={ready} slow={slow} />
+        <Intro ready={ready} />
         {ready && <FinalPublicMenu groups={groups} catalog={catalog} onOpen={setSelected} />}
         <ProductModal product={selected} onClose={() => setSelected(null)} />
       </>
@@ -2579,7 +2559,7 @@ function App() {
   const current = path;
   return (
     <>
-      {!path.includes("staff-portal") && <Intro ready={ready} slow={slow} />}
+      {!path.includes("staff-portal") && <Intro ready={ready} />}
       {!path.includes("staff-portal") && <Header current={current} />}
       {catalog.length && path.includes("version-1") ? <Version1 groups={groups} onOpen={setSelected} /> : null}
       {catalog.length && path.includes("version-2") ? <Version2 groups={groups} onOpen={setSelected} /> : null}
