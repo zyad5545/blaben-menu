@@ -1390,22 +1390,18 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
 
         <section id="products-panel" className="mt-10 grid scroll-mt-28 gap-5">
           {selectedGroup && (
-            <nav className="sticky top-[68px] z-30 -mx-3 rounded-lg border border-blue-100 bg-white/95 px-3 py-3 shadow-sm backdrop-blur-xl md:top-[82px]" aria-label="تغيير التصنيف">
-              <div className="relative -mx-1">
-                <div className="flex gap-2 overflow-x-auto px-1 pb-1">
-                  {groups.map((group, index) => (
-                    <button
-                      key={`sticky-${group.name}`}
-                      type="button"
-                      onClick={() => chooseCategory(index)}
-                      className={`shrink-0 rounded-full border px-4 py-2 text-sm font-black transition ${selectedCategory === index ? "border-blaben-850 bg-blaben-850 text-white shadow" : "border-blue-100 bg-white text-blaben-850 hover:border-blaben-850 hover:bg-blaben-50"}`}
-                    >
-                      {group.name}
-                    </button>
-                  ))}
-                </div>
-                <span className="pointer-events-none absolute inset-y-0 start-0 w-6 bg-gradient-to-r from-white/95 to-transparent" aria-hidden="true" />
-                <span className="pointer-events-none absolute inset-y-0 end-0 w-6 bg-gradient-to-l from-white/95 to-transparent" aria-hidden="true" />
+            <nav className="sticky top-[68px] z-30 -mx-3 overflow-x-auto rounded-lg border border-blue-100 bg-white/95 px-3 py-3 shadow-sm backdrop-blur-xl md:top-[82px]" aria-label="تغيير التصنيف">
+              <div className="flex min-w-max gap-2">
+                {groups.map((group, index) => (
+                  <button
+                    key={`sticky-${group.name}`}
+                    type="button"
+                    onClick={() => chooseCategory(index)}
+                    className={`rounded-full px-4 py-2 text-sm font-black transition ${selectedCategory === index ? "bg-blaben-850 text-white shadow" : "bg-blaben-50 text-blaben-850 hover:bg-blaben-100"}`}
+                  >
+                    {group.name}
+                  </button>
+                ))}
               </div>
             </nav>
           )}
