@@ -1450,12 +1450,12 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
             {showCategoryHint && (
               <div className={`category-swipe-hint ${isCategoryHintClosing ? "is-closing" : ""}`} aria-hidden="true">
                 <div className="category-swipe-hint-content">
+                  <span className="category-swipe-label">اسحب لليمين</span>
                   <div className="category-swipe-arrows">
                     <span>❯</span>
                     <span>❯</span>
                     <span>❯</span>
                   </div>
-                  <span className="category-swipe-label">اسحب لليمين</span>
                 </div>
               </div>
             )}
@@ -1485,7 +1485,10 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
                       <span className="text-xs font-bold text-blaben-700">{priceSummary(product)}</span>
                       {product.state === "unavailable" && <span className="text-xs font-bold text-red-500">غير متاح</span>}
                     </div>
-                    <span className="w-max rounded-full bg-blaben-950/75 px-2 py-1 text-[10px] font-bold text-white" style={{ gridColumn: "1 / -1", justifySelf: "left" }}>انقر لعرض التفاصيل</span>
+                    <span className="product-details-cta" style={{ gridColumn: "1 / -1", justifySelf: "left" }}>
+                      <span>عرض التفاصيل</span>
+                      <span aria-hidden="true">‹</span>
+                    </span>
                   </button>
                 ))}
               </div>
@@ -1499,17 +1502,30 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
         </section>
       </main>
       <footer className="blaben-footer" aria-label="معلومات التواصل">
-        <a href="tel:01111692333" dir="ltr">01111692333</a>
-        <address>ميدان الوايلي الكبير - بجوار مسجد ابو بكر الصديق</address>
+        <div className="blaben-footer-inner">
+          <div className="blaben-footer-brand">
+            <img loading="lazy" decoding="async" src={asset("b.laben logo.jfif")} alt="ب لبن" />
+          </div>
+          <div className="blaben-footer-details">
+            <a className="blaben-footer-row" href="tel:01111692333" dir="ltr">
+              <span className="blaben-footer-icon" aria-hidden="true">☎</span>
+              <span><strong>01111692333</strong><small dir="rtl">اتصل بنا</small></span>
+            </a>
+            <address className="blaben-footer-row">
+              <span className="blaben-footer-icon" aria-hidden="true">⌖</span>
+              <span><strong>ميدان الوايلي الكبير - بجوار</strong><small>مسجد ابو بكر الصديق</small></span>
+            </address>
+          </div>
+        </div>
+        <div className="blaben-footer-wave" aria-hidden="true" />
       </footer>
       <button
         type="button"
         onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-        className={`fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full bg-blaben-850 px-4 py-3 text-white shadow-luxe transition ${showTop ? "translate-y-0 opacity-100 animate-floatSoft" : "pointer-events-none translate-y-4 opacity-0"}`}
+        className={`menu-back-to-top fixed bottom-5 right-5 z-40 rounded-full bg-blaben-850 text-white shadow-luxe transition ${showTop ? "translate-y-0 opacity-100 animate-floatSoft" : "pointer-events-none translate-y-4 opacity-0"}`}
         aria-label="العودة إلى أعلى الصفحة"
       >
-        <span className="text-xl font-black leading-none" aria-hidden="true">↑</span>
-        <span className="text-sm font-black">للأعلى</span>
+        <span aria-hidden="true">↑</span>
       </button>
     </>
   );
