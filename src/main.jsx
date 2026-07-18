@@ -1431,6 +1431,7 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
         </section>
 
         <section id="products-panel" className="mt-10 grid scroll-mt-28 gap-5">
+          {selectedGroup && (
           <div ref={categoryRailRef} className="category-rail-shell sticky top-[68px] z-30 -mx-3 md:top-[82px]">
               <nav ref={categoryNavRef} className="overflow-x-auto rounded-lg border border-blue-100 bg-white/95 px-3 py-3 shadow-sm backdrop-blur-xl" aria-label="تغيير التصنيف" onPointerDown={dismissCategoryHint}>
               <div className="flex min-w-max gap-2">
@@ -1450,15 +1451,16 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
               <div className={`category-swipe-hint ${isCategoryHintClosing ? "is-closing" : ""}`} aria-hidden="true">
                 <div className="category-swipe-hint-content">
                   <div className="category-swipe-arrows">
-                    <span>❮</span>
-                    <span>❮</span>
-                    <span>❮</span>
+                    <span>❯</span>
+                    <span>❯</span>
+                    <span>❯</span>
                   </div>
-                  <span className="category-swipe-label">اسحب لليسار</span>
+                  <span className="category-swipe-label">اسحب لليمين</span>
                 </div>
               </div>
             )}
           </div>
+          )}
           {selectedGroup ? (
             <section id={`cat-${selectedCategory}`} key={selectedGroup.name} className="scroll-mt-32">
               <div className="mb-4 flex items-end justify-between gap-4">
@@ -1496,6 +1498,10 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
           )}
         </section>
       </main>
+      <footer className="blaben-footer" aria-label="معلومات التواصل">
+        <a href="tel:01111692333" dir="ltr">01111692333</a>
+        <address>ميدان الوايلي الكبير - بجوار مسجد ابو بكر الصديق</address>
+      </footer>
       <button
         type="button"
         onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
