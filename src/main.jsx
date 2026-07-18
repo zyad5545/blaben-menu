@@ -241,6 +241,19 @@ function isSafeImageSrc(src) {
   return /^[^\\/:*?"<>|]+?\.(?:png|jpe?g|jfif|webp|gif)$/i.test(value);
 }
 
+// Stricter than isSafeImageSrc: safe to WRITE to the database, not just safe
+// to render. A base64 data URI is fine to display locally, but must never
+// be persisted to the products table — a single embedded photo can be
+// hundreds of KB of text, and doing this on a batch of rows is exactly
+// what caused an 11MB products response (products imported with an image
+// still in base64 form, e.g. from the old manage.html page's localStorage
+// data, instead of an uploaded Storage URL).
+function isPersistableImageSrc(src) {
+  const value = String(src || "");
+  if (value.startsWith("data:image/")) return false;
+  return isSafeImageSrc(value);
+}
+
 function normalizeArabic(value) {
   return String(value)
     .replace(/\.[^.]+$/, "")
@@ -1912,7 +1925,7 @@ function toSupabaseProduct(product) {
     price: limitText(product.price, 60),
     description: limitText(product.description || "", 500),
     state: ["available", "unavailable", "special_offer", "coming_soon"].includes(product.state) ? product.state : "available",
-    image_url: isSafeImageSrc(product.image) ? product.image : "b.laben logo.jfif",
+    image_url: isPersistableImageSrc(product.image) ? product.image : "b.laben logo.jfif",
     sort_order: product.sort_order ?? product.sort ?? 0,
     variants: Array.isArray(product.variants)
       ? product.variants.map((variant) => ({
