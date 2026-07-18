@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient } from "@supabase/supabase-js";
+import { Analytics } from "@vercel/analytics/react";
 import "./style.css";
 
 const ASSET = "/menu-assets/";
@@ -2691,6 +2692,7 @@ function App() {
         {ready && <FinalPublicMenu groups={groups} catalog={catalog} onOpen={setSelected} />}
         <ProductModal product={selected} onClose={closeSelected} />
         <ExitConfirmDialog open={showExitConfirm} onCancel={() => setShowExitConfirm(false)} onConfirm={() => { setShowExitConfirm(false); allowExit(); }} />
+        <Analytics />
       </>
     );
   }
@@ -2710,6 +2712,7 @@ function App() {
       {path.includes("staff-portal") ? <AdminPortal catalog={catalog} /> : null}
       <ProductModal product={selected} onClose={closeSelected} />
       <ExitConfirmDialog open={showExitConfirm} onCancel={() => setShowExitConfirm(false)} onConfirm={() => { setShowExitConfirm(false); allowExit(); }} />
+      <Analytics />
     </>
   );
 }
