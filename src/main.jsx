@@ -2641,7 +2641,9 @@ function useBackGuard(isOverlayOpen, closeOverlay, onExitRequest) {
 
   return useCallback(() => {
     allowExitRef.current = true;
-    window.history.back();
+    // One entry is the re-armed guard and the next is the current page.
+    // Skip both so the browser returns to the page the visitor came from.
+    window.history.go(-2);
   }, []);
 }
 
