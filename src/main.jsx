@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient } from "@supabase/supabase-js";
 import "./style.css";
@@ -1344,6 +1344,7 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [showTop, setShowTop] = useState(false);
+  const [showCategoryScrollHint, setShowCategoryScrollHint] = useState(true);
   const [showTapHint, setShowTapHint] = useState(() => {
     try {
       return !localStorage.getItem("blabenSeenProductTapHint");
@@ -1382,20 +1383,20 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
     <>
       <PublicHeader query={query} onQuery={setQuery} results={searchResults} onOpen={handleProductOpen} />
       <main className="mx-auto w-[min(1240px,calc(100%-24px))] pb-20">
-        <section className="grid grid-cols-1 gap-4 pt-6 sm:grid-cols-2 lg:grid-cols-4" aria-label="تصنيفات المنيو">
+        <section className="grid grid-cols-1 gap-3 pt-6 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4" aria-label="تصنيفات المنيو">
           {groups.map((group, index) => (
             <button
               key={group.name}
               type="button"
               onClick={() => chooseCategory(index)}
-              className={`relative min-h-64 w-full overflow-hidden rounded-lg text-right text-white shadow-luxe transition hover:-translate-y-1 ${selectedCategory === index || (selectedCategory === null && index === 0) ? "ring-4 ring-blaben-100" : ""}`}
+              className={`relative h-36 w-full overflow-hidden rounded-lg text-right text-white shadow-luxe transition hover:-translate-y-1 sm:h-56 md:min-h-64 ${selectedCategory === index || (selectedCategory === null && index === 0) ? "ring-4 ring-blaben-100" : ""}`}
             >
               <img loading="lazy" decoding="async" src={asset(group.image)} alt="" className="absolute inset-0 h-full w-full object-cover transition duration-500 hover:scale-105" />
               <span className="absolute inset-0 bg-gradient-to-t from-blaben-950/90 via-blaben-950/24 to-transparent" />
-              <span className="absolute bottom-5 right-5 z-10 grid gap-2">
-                <small className="w-max rounded-full bg-white px-3 py-1 text-xs font-black text-blaben-850 animate-pulse">اضغط هنا للانتقال إلى المنتجات</small>
-                <strong className="text-2xl">{group.name}</strong>
-                <small className="font-bold text-white/80">{group.items.length} منتج</small>
+              <span className="absolute bottom-3 right-3 z-10 grid gap-1 sm:bottom-5 sm:right-5 sm:gap-2">
+                <small className="w-max rounded-full bg-white px-2.5 py-1 text-[10px] font-black text-blaben-850 animate-pulse sm:px-3 sm:text-xs">اضغط هنا للانتقال إلى المنتجات</small>
+                <strong className="text-lg sm:text-2xl">{group.name}</strong>
+                <small className="text-xs font-bold text-white/80 sm:text-sm">{group.items.length} منتج</small>
               </span>
             </button>
           ))}
@@ -1403,20 +1404,31 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
 
         <section id="products-panel" className="mt-10 grid scroll-mt-28 gap-5">
           {selectedGroup && (
-            <nav className="sticky top-[68px] z-30 -mx-3 overflow-x-auto rounded-lg border border-blue-100 bg-white/95 px-3 py-3 shadow-sm backdrop-blur-xl md:top-[82px]" aria-label="تغيير التصنيف">
-              <div className="flex min-w-max gap-2">
-                {groups.map((group, index) => (
-                  <button
-                    key={`sticky-${group.name}`}
-                    type="button"
-                    onClick={() => chooseCategory(index)}
-                    className={`rounded-full px-4 py-2 text-sm font-black transition ${selectedCategory === index ? "bg-blaben-850 text-white shadow" : "bg-blaben-50 text-blaben-850 hover:bg-blaben-100"}`}
-                  >
-                    {group.name}
-                  </button>
-                ))}
-              </div>
-            </nav>
+            <div className="relative">
+              <nav
+                className="sticky top-[68px] z-30 -mx-3 overflow-x-auto rounded-lg border border-blue-100 bg-white/95 px-3 py-3 shadow-sm backdrop-blur-xl md:top-[82px]"
+                aria-label="تغيير التصنيف"
+                onScroll={() => setShowCategoryScrollHint(false)}
+              >
+                <div className="flex min-w-max gap-2">
+                  {groups.map((group, index) => (
+                    <button
+                      key={`sticky-${group.name}`}
+                      type="button"
+                      onClick={() => chooseCategory(index)}
+                      className={`rounded-full px-4 py-2 text-sm font-black transition ${selectedCategory === index ? "bg-blaben-850 text-white shadow" : "bg-blaben-50 text-blaben-850 hover:bg-blaben-100"}`}
+                    >
+                      {group.name}
+                    </button>
+                  ))}
+                </div>
+              </nav>
+              {showCategoryScrollHint && groups.length > 3 && (
+                <span className="swipe-hint pointer-events-none absolute bottom-3 left-2 z-40 flex items-center gap-1 rounded-full bg-blaben-950/75 px-2.5 py-1 text-xs font-black text-white shadow" aria-hidden="true">
+                  اسحب ‹‹
+                </span>
+              )}
+            </div>
           )}
           {selectedGroup ? (
             <section id={`cat-${selectedCategory}`} key={selectedGroup.name} className="scroll-mt-32">
@@ -2534,11 +2546,51 @@ function Field({ label, name, placeholder }) {
   );
 }
 
+// Makes the mobile back button/gesture close an open overlay (like the
+// product detail modal) instead of immediately leaving the site. Only when
+// the user presses back with nothing open do we ask them to confirm they
+// actually want to exit.
+//
+// How it works: we keep one extra history entry pushed at all times as a
+// "guard". The first back press consumes that entry (firing popstate,
+// which we can intercept, since we haven't actually left the page/document
+// yet). If an overlay is open, we close it and immediately push a new
+// guard entry so the trap stays armed. If nothing is open, we ask for
+// confirmation — if the user cancels, we re-arm the guard; if they
+// confirm, we do nothing further and let the browser's already-completed
+// back navigation proceed (which, since our guard entry is gone, moves on
+// to wherever the user was before arriving at the site).
+function useBackGuard(isOverlayOpen, closeOverlay) {
+  const overlayOpenRef = useRef(isOverlayOpen);
+  useEffect(() => {
+    overlayOpenRef.current = isOverlayOpen;
+  }, [isOverlayOpen]);
+
+  useEffect(() => {
+    window.history.pushState({ blabenGuard: true }, "", window.location.href);
+    const handlePopState = () => {
+      if (overlayOpenRef.current) {
+        closeOverlay();
+        window.history.pushState({ blabenGuard: true }, "", window.location.href);
+        return;
+      }
+      const confirmed = window.confirm("هل أنت متأكد أنك تريد الخروج؟");
+      if (!confirmed) {
+        window.history.pushState({ blabenGuard: true }, "", window.location.href);
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [closeOverlay]);
+}
+
 function App() {
   const catalog = useCatalog();
   const groups = useMemo(() => groupProducts(catalog), [catalog]);
   const ready = catalog.length > 0;
   const [selected, setSelected] = useState(null);
+  const closeSelected = useCallback(() => setSelected(null), []);
+  useBackGuard(Boolean(selected), closeSelected);
   const path = window.location.pathname;
 
   useEffect(() => {
@@ -2556,7 +2608,7 @@ function App() {
       <>
         <Intro ready={ready} />
         {ready && <FinalPublicMenu groups={groups} catalog={catalog} onOpen={setSelected} />}
-        <ProductModal product={selected} onClose={() => setSelected(null)} />
+        <ProductModal product={selected} onClose={closeSelected} />
       </>
     );
   }
@@ -2574,7 +2626,7 @@ function App() {
       {catalog.length && path.includes("version-6") ? <Version6 groups={groups} onOpen={setSelected} /> : null}
       {catalog.length && path.includes("version-7") ? <Version7 groups={groups} onOpen={setSelected} /> : null}
       {path.includes("staff-portal") ? <AdminPortal catalog={catalog} /> : null}
-      <ProductModal product={selected} onClose={() => setSelected(null)} />
+      <ProductModal product={selected} onClose={closeSelected} />
     </>
   );
 }

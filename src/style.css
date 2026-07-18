@@ -209,6 +209,15 @@ img {
   50% { transform: scale(1.05); }
 }
 
+@keyframes swipeHintNudge {
+  0%, 100% { transform: translateX(0); opacity: 0.85; }
+  50% { transform: translateX(-8px); opacity: 0.5; }
+}
+
+.swipe-hint {
+  animation: swipeHintNudge 1.3s ease-in-out infinite;
+}
+
 /* ── Version 7: Tabbed Accordion ── */
 
 .v7-tab-bar {
