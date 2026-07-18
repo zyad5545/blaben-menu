@@ -1517,7 +1517,6 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
             </address>
           </div>
         </div>
-        <div className="blaben-footer-wave" aria-hidden="true" />
       </footer>
       <button
         type="button"
