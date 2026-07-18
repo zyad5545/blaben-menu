@@ -2607,31 +2607,58 @@ function Field({ label, name, placeholder }) {
 // yet). If an overlay is open, we close it and immediately push a new
 // guard entry so the trap stays armed. If nothing is open, we ask for
 // confirmation — if the user cancels, we re-arm the guard; if they
-// confirm, we do nothing further and let the browser's already-completed
-// back navigation proceed (which, since our guard entry is gone, moves on
-// to wherever the user was before arriving at the site).
-function useBackGuard(isOverlayOpen, closeOverlay) {
+// confirm, we allow the already-armed history entry to be consumed and then
+// let the browser continue to the previous page.
+function useBackGuard(isOverlayOpen, closeOverlay, onExitRequest) {
   const overlayOpenRef = useRef(isOverlayOpen);
+  const exitRequestRef = useRef(onExitRequest);
+  const allowExitRef = useRef(false);
   useEffect(() => {
     overlayOpenRef.current = isOverlayOpen;
   }, [isOverlayOpen]);
+  useEffect(() => {
+    exitRequestRef.current = onExitRequest;
+  }, [onExitRequest]);
 
   useEffect(() => {
     window.history.pushState({ blabenGuard: true }, "", window.location.href);
     const handlePopState = () => {
+      if (allowExitRef.current) {
+        allowExitRef.current = false;
+        return;
+      }
       if (overlayOpenRef.current) {
         closeOverlay();
         window.history.pushState({ blabenGuard: true }, "", window.location.href);
         return;
       }
-      const confirmed = window.confirm("هل أنت متأكد أنك تريد الخروج؟");
-      if (!confirmed) {
-        window.history.pushState({ blabenGuard: true }, "", window.location.href);
-      }
+      exitRequestRef.current();
+      window.history.pushState({ blabenGuard: true }, "", window.location.href);
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, [closeOverlay]);
+
+  return useCallback(() => {
+    allowExitRef.current = true;
+    window.history.back();
+  }, []);
+}
+
+function ExitConfirmDialog({ open, onCancel, onConfirm }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[90] grid place-items-center p-4" role="presentation">
+      <button className="absolute inset-0 bg-blaben-950/45 backdrop-blur-sm" aria-label="إغلاق" onClick={onCancel} />
+      <section className="exit-confirm-dialog relative z-10 w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-2xl" role="alertdialog" aria-modal="true" aria-labelledby="exit-confirm-title">
+        <h2 id="exit-confirm-title" className="text-xl font-black text-blaben-950">هل أنت متأكد أنك تريد الخروج؟</h2>
+        <div className="mt-6 flex gap-3">
+          <button type="button" className="exit-confirm-button exit-confirm-button-danger" onClick={onConfirm}>خروج</button>
+          <button type="button" className="exit-confirm-button exit-confirm-button-cancel" onClick={onCancel}>لا</button>
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function App() {
@@ -2639,8 +2666,10 @@ function App() {
   const groups = useMemo(() => groupProducts(catalog), [catalog]);
   const ready = catalog.length > 0;
   const [selected, setSelected] = useState(null);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
   const closeSelected = useCallback(() => setSelected(null), []);
-  useBackGuard(Boolean(selected), closeSelected);
+  const requestExitConfirm = useCallback(() => setShowExitConfirm(true), []);
+  const allowExit = useBackGuard(Boolean(selected), closeSelected, requestExitConfirm);
   const path = window.location.pathname;
 
   useEffect(() => {
@@ -2659,6 +2688,7 @@ function App() {
         <Intro ready={ready} />
         {ready && <FinalPublicMenu groups={groups} catalog={catalog} onOpen={setSelected} />}
         <ProductModal product={selected} onClose={closeSelected} />
+        <ExitConfirmDialog open={showExitConfirm} onCancel={() => setShowExitConfirm(false)} onConfirm={() => { setShowExitConfirm(false); allowExit(); }} />
       </>
     );
   }
@@ -2677,6 +2707,7 @@ function App() {
       {catalog.length && path.includes("version-7") ? <Version7 groups={groups} onOpen={setSelected} /> : null}
       {path.includes("staff-portal") ? <AdminPortal catalog={catalog} /> : null}
       <ProductModal product={selected} onClose={closeSelected} />
+      <ExitConfirmDialog open={showExitConfirm} onCancel={() => setShowExitConfirm(false)} onConfirm={() => { setShowExitConfirm(false); allowExit(); }} />
     </>
   );
 }
