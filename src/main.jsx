@@ -15,6 +15,7 @@ const FINAL_CATEGORY_ORDER = ["دنيا الرز", "دنيا القطوطة", "�
 const MENU_REVISION_KEY = "blabenMenuRevision";
 const MENU_EVENT = "blaben:menu-updated";
 const MENU_CHANNEL_NAME = "blaben-menu";
+const CATEGORY_HINT_SESSION_KEY = "blabenCategorySwipeHintSeen";
 // The "coming soon" state label used in badges across the menu.
 const COMING_SOON_LABEL = "قريبا";
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -855,15 +856,14 @@ function ProductModal({ product, onClose }) {
       <section
         role="dialog"
         aria-modal="true"
-        className="relative grid w-full max-w-4xl animate-slideUp overflow-hidden rounded-t-2xl bg-white shadow-2xl md:grid-cols-[.95fr_1fr] md:rounded-lg"
-        style={{ maxHeight: "calc(100dvh - 2rem)" }}
+        className="product-modal-shell relative grid w-full max-w-4xl animate-slideUp overflow-hidden rounded-t-2xl bg-white shadow-2xl md:grid-cols-[.95fr_1fr] md:rounded-lg"
       >
         <button className="absolute start-3 top-3 z-10 grid h-11 w-11 place-items-center rounded-full bg-white/90 text-2xl font-black text-blaben-950 shadow" onClick={onClose} aria-label="إغلاق">×</button>
-        <div className="relative h-56 shrink-0 bg-blaben-50 md:h-full md:min-h-[430px]">
+        <div className="product-modal-image relative h-56 shrink-0 bg-blaben-50 md:h-full md:min-h-[430px]">
           <img loading="lazy" decoding="async" src={asset(product.image)} alt={product.name} className="h-full w-full object-cover" />
           {product.state === "coming_soon" && <span className="absolute start-3 top-3 rounded-full bg-amber-500 px-3 py-1.5 text-sm font-black text-white shadow-md animate-pulse">{COMING_SOON_LABEL}</span>}
         </div>
-        <div className="grid min-h-0 content-start gap-4 overflow-y-auto p-6 md:content-center md:p-10">
+        <div className="product-modal-details grid min-h-0 content-start gap-4 p-6 md:content-center md:p-10">
           <p className="font-black text-blaben-700">{product.category}</p>
           <h2 className="text-3xl font-black leading-tight text-blaben-950 md:text-5xl">{product.name}</h2>
           <p className="leading-8 text-slate-600">{product.description || "لا يوجد وصف إضافي لهذا المنتج حاليا."}</p>
@@ -1344,7 +1344,17 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [showTop, setShowTop] = useState(false);
-  const [showCategoryScrollHint, setShowCategoryScrollHint] = useState(true);
+  const categoryRailRef = useRef(null);
+  const categoryNavRef = useRef(null);
+  const categoryHintDismissedRef = useRef(false);
+  const [isCategoryHintClosing, setIsCategoryHintClosing] = useState(false);
+  const [showCategoryHint, setShowCategoryHint] = useState(() => {
+    try {
+      return sessionStorage.getItem(CATEGORY_HINT_SESSION_KEY) !== "1";
+    } catch {
+      return true;
+    }
+  });
   const [showTapHint, setShowTapHint] = useState(() => {
     try {
       return !localStorage.getItem("blabenSeenProductTapHint");
@@ -1358,6 +1368,17 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
     setSelectedCategory(index);
     window.setTimeout(scrollToProductPanel, 40);
   };
+  const dismissCategoryHint = useCallback(() => {
+    if (categoryHintDismissedRef.current) return;
+    categoryHintDismissedRef.current = true;
+    setIsCategoryHintClosing(true);
+    try {
+      sessionStorage.setItem(CATEGORY_HINT_SESSION_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+    window.setTimeout(() => setShowCategoryHint(false), 260);
+  }, []);
   const dismissTapHint = () => {
     if (!showTapHint) return;
     setShowTapHint(false);
@@ -1378,6 +1399,13 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
     onScroll();
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  useEffect(() => {
+    if (!showCategoryHint || !categoryNavRef.current) return undefined;
+    const nav = categoryNavRef.current;
+    nav.addEventListener("scroll", dismissCategoryHint, { passive: true });
+    return () => nav.removeEventListener("scroll", dismissCategoryHint);
+  }, [dismissCategoryHint, showCategoryHint]);
 
   return (
     <>
@@ -1403,33 +1431,34 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
         </section>
 
         <section id="products-panel" className="mt-10 grid scroll-mt-28 gap-5">
-          {selectedGroup && (
-            <div className="relative">
-              <nav
-                className="sticky top-[68px] z-30 -mx-3 overflow-x-auto rounded-lg border border-blue-100 bg-white/95 px-3 py-3 shadow-sm backdrop-blur-xl md:top-[82px]"
-                aria-label="تغيير التصنيف"
-                onScroll={() => setShowCategoryScrollHint(false)}
-              >
-                <div className="flex min-w-max gap-2">
-                  {groups.map((group, index) => (
-                    <button
-                      key={`sticky-${group.name}`}
-                      type="button"
-                      onClick={() => chooseCategory(index)}
-                      className={`rounded-full px-4 py-2 text-sm font-black transition ${selectedCategory === index ? "bg-blaben-850 text-white shadow" : "bg-blaben-50 text-blaben-850 hover:bg-blaben-100"}`}
-                    >
-                      {group.name}
-                    </button>
-                  ))}
+          <div ref={categoryRailRef} className="category-rail-shell sticky top-[68px] z-30 -mx-3 md:top-[82px]">
+              <nav ref={categoryNavRef} className="overflow-x-auto rounded-lg border border-blue-100 bg-white/95 px-3 py-3 shadow-sm backdrop-blur-xl" aria-label="تغيير التصنيف" onPointerDown={dismissCategoryHint}>
+              <div className="flex min-w-max gap-2">
+                {groups.map((group, index) => (
+                  <button
+                    key={`sticky-${group.name}`}
+                    type="button"
+                    onClick={() => chooseCategory(index)}
+                    className={`rounded-full px-4 py-2 text-sm font-black transition ${selectedCategory === index ? "bg-blaben-850 text-white shadow" : "bg-blaben-50 text-blaben-850 hover:bg-blaben-100"}`}
+                  >
+                    {group.name}
+                  </button>
+                ))}
+              </div>
+            </nav>
+            {showCategoryHint && (
+              <div className={`category-swipe-hint ${isCategoryHintClosing ? "is-closing" : ""}`} aria-hidden="true">
+                <div className="category-swipe-hint-content">
+                  <div className="category-swipe-arrows">
+                    <span>❮</span>
+                    <span>❮</span>
+                    <span>❮</span>
+                  </div>
+                  <span className="category-swipe-label">اسحب لليسار</span>
                 </div>
-              </nav>
-              {showCategoryScrollHint && groups.length > 3 && (
-                <span className="swipe-hint pointer-events-none absolute bottom-3 left-2 z-40 flex items-center gap-1 rounded-full bg-blaben-950/75 px-2.5 py-1 text-xs font-black text-white shadow" aria-hidden="true">
-                  اسحب ‹‹
-                </span>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
           {selectedGroup ? (
             <section id={`cat-${selectedCategory}`} key={selectedGroup.name} className="scroll-mt-32">
               <div className="mb-4 flex items-end justify-between gap-4">

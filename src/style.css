@@ -20,6 +20,99 @@ img {
   max-width: 100%;
 }
 
+.product-modal-shell {
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: min(90dvh, 720px);
+}
+
+.product-modal-image {
+  max-height: 30dvh;
+}
+
+.product-modal-details {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.category-rail-shell {
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: 0.5rem;
+}
+
+.category-swipe-hint {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(3px);
+  pointer-events: none;
+  animation: categoryHintFadeIn 240ms ease-out both;
+  transition: opacity 250ms ease;
+}
+
+.category-swipe-hint.is-closing {
+  opacity: 0;
+}
+
+.category-swipe-hint-content {
+  display: grid;
+  justify-items: center;
+  gap: 0.4rem;
+  color: #fff;
+  direction: rtl;
+}
+
+.category-swipe-arrows {
+  display: flex;
+  gap: 0.45rem;
+  direction: ltr;
+  font-size: clamp(1.5rem, 3vw, 1.9rem);
+  line-height: 1;
+}
+
+.category-swipe-arrows span {
+  opacity: 0.3;
+  animation: categorySwipeArrow 1.45s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.category-swipe-arrows span:nth-child(1) { animation-delay: 0.48s; }
+.category-swipe-arrows span:nth-child(2) { animation-delay: 0.24s; }
+.category-swipe-arrows span:nth-child(3) { animation-delay: 0s; }
+
+.category-swipe-label {
+  font-size: clamp(1rem, 2.5vw, 1.125rem);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+@keyframes categoryHintFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes categorySwipeArrow {
+  0%, 100% { opacity: 0.3; transform: translateX(0) scale(1); }
+  14%, 32% { opacity: 1; transform: translateX(-7px) scale(1.1); text-shadow: 0 0 12px rgba(255,255,255,0.75); }
+  48% { opacity: 0.3; transform: translateX(0) scale(1); text-shadow: none; }
+}
+
+@media (min-width: 821px) {
+  .product-modal-shell {
+    grid-template-rows: none;
+  }
+
+  .product-modal-image {
+    max-height: none;
+  }
+}
+
 .reveal-card,
 .reveal-panel {
   animation: slideUp .72s cubic-bezier(.2,.8,.2,1) both;
@@ -207,15 +300,6 @@ img {
 @keyframes introLogoBreathe {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.05); }
-}
-
-@keyframes swipeHintNudge {
-  0%, 100% { transform: translateX(0); opacity: 0.85; }
-  50% { transform: translateX(-8px); opacity: 0.5; }
-}
-
-.swipe-hint {
-  animation: swipeHintNudge 1.3s ease-in-out infinite;
 }
 
 /* ── Version 7: Tabbed Accordion ── */
