@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client";
 import { createClient } from "@supabase/supabase-js";
 import "./style.css";
+import { Analytics } from "@vercel/analytics/react";
 
 const ASSET = "/menu-assets/";
 const CUSTOM_KEY = "blabenCustomProducts";
@@ -2714,4 +2715,9 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(
+  <>
+    <App />
+    <Analytics />
+  </>
+);
