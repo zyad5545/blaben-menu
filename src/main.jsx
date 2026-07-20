@@ -1411,7 +1411,7 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
   return (
     <>
       <PublicHeader query={query} onQuery={setQuery} results={searchResults} onOpen={handleProductOpen} />
-      <main className="mx-auto w-[min(1240px,calc(100%-24px))] pb-20">
+      <main className="mx-auto w-[min(1240px,calc(100%-24px))] pb-6">
         <section className="grid grid-cols-1 gap-3 pt-6 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4" aria-label="تصنيفات المنيو">
           {groups.map((group, index) => (
             <button
@@ -1509,11 +1509,15 @@ function FinalPublicMenu({ groups, catalog, onOpen }) {
           </div>
           <div className="blaben-footer-details">
             <a className="blaben-footer-row" href="tel:01111692333" dir="ltr">
-              <span className="blaben-footer-icon" aria-hidden="true">☎</span>
+              <span className="blaben-footer-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M6.6 3.2 9.3 2l2.1 4.7-2.2 1.8a14.4 14.4 0 0 0 6.3 6.3l1.8-2.2 4.7 2.1-1.2 2.7a2 2 0 0 1-2.2 1.2C10.7 17.5 6.5 13.3 3.6 5.4a2 2 0 0 1 1.2-2.2Z" /></svg>
+              </span>
               <span><strong>01111692333</strong><small dir="rtl">اتصل بنا</small></span>
             </a>
             <address className="blaben-footer-row">
-              <span className="blaben-footer-icon" aria-hidden="true">⌖</span>
+              <span className="blaben-footer-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M12 21s7-6.1 7-12A7 7 0 0 0 5 9c0 5.9 7 12 7 12Z" /><circle cx="12" cy="9" r="2.4" /></svg>
+              </span>
               <span><strong>ميدان الوايلي الكبير - بجوار</strong><small>مسجد ابو بكر الصديق</small></span>
             </address>
           </div>

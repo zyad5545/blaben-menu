@@ -48,7 +48,7 @@ img {
   display: grid;
   place-items: center;
   border-radius: inherit;
-  background: rgba(239, 246, 255, 0.92);
+  background: rgba(239, 246, 255, 0.76);
   border: 1px solid rgba(147, 197, 253, 0.65);
   backdrop-filter: blur(4px);
   pointer-events: none;
@@ -130,7 +130,7 @@ img {
   isolation: isolate;
   overflow: hidden;
   max-width: 1240px;
-  margin: 3rem auto 1rem;
+  margin: 0.75rem auto 1rem;
   border: 1px solid #dbe3ef;
   border-radius: 1.5rem;
   background: #fff;
@@ -209,6 +209,16 @@ img {
   color: #0759b5;
   font-size: 1.85rem;
   direction: ltr;
+}
+
+.blaben-footer-icon svg {
+  width: 27px;
+  height: 27px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
 }
 
 .menu-back-to-top {
