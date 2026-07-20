@@ -48,7 +48,7 @@ img {
   display: grid;
   place-items: center;
   border-radius: inherit;
-  background: rgba(239, 246, 255, 0.90);
+  background: rgba(239, 246, 255, 0.97);
   border: 1px solid rgba(147, 197, 253, 0.65);
   backdrop-filter: blur(4px);
   pointer-events: none;
